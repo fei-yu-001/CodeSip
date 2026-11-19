@@ -60,8 +60,8 @@ export default function GlassEffects() {
     const selectors =
       '.mobile-nav,.search-input,.topbar,.modal,.button.primary,.button.secondary,.sidebar nav';
     const attach = (el: HTMLElement) => {
-      if (attached.has(el)) return;
       el.classList.add('liquid');
+      if (attached.has(el)) return;
       const id = `codesip-glass-${++counter}`;
       const filter = document.createElementNS(svgNS, 'filter');
       filter.id = id;

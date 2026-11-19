@@ -19,7 +19,7 @@ test('glass refraction bends a grid, touch tabs click and drag, and cancelled dr
       data: { username: 'browser', password: 'browser-test-password' },
     });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: '留一点时间，读懂代码。' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '代码项目', exact: true })).toBeVisible();
   if (info.project.name === 'mobile') {
     const nav = page.locator('.mobile-nav');
     await nav.getByRole('button', { name: '学习笔记' }).click();

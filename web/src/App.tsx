@@ -16,10 +16,8 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Cloud,
   CloudOff,
   Code2,
-  Coffee,
   Copy,
   Download,
   File,
@@ -118,47 +116,12 @@ function Auth({
   return (
     <div className="auth-page">
       <section className="auth-story">
+        <img className="auth-image" src="/art/code-study.webp" alt="" fetchPriority="high" />
         <Brand />
-        <div className="auth-copy">
-          <span className="eyebrow">
-            <span /> YOUR POCKET READING ROOM
-          </span>
-          <h1>
-            好代码，
-            <br />
-            值得慢慢读<span>。</span>
-          </h1>
-          <p>
-            把项目和学习笔记装进口袋。
-            <br />
-            一杯咖啡的时间，离理解再近一点。
-          </p>
-          <div className="auth-benefits">
-            <span>
-              <Code2 size={18} /> 读代码
-            </span>
-            <span>
-              <BookOpen size={18} /> 理思路
-            </span>
-            <span>
-              <Cloud size={18} /> 随时看
-            </span>
-          </div>
-        </div>
-        <div className="auth-footer">
-          少一点切换，多一点专注。<span>CodeSip / 01</span>
-        </div>
       </section>
       <section className="auth-form-area">
         <div className="auth-card">
-          <div className="auth-mark">
-            <Coffee size={29} />
-          </div>
-          <span className="eyebrow">MAKE ROOM FOR IDEAS</span>
-          <h2>{setup ? '建立你的阅读空间' : '欢迎回来'}</h2>
-          <p>
-            {setup ? '创建一个账号，让电脑与手机在这里相遇。' : '登录后，接着上次的思路往下读。'}
-          </p>
+          <h2>{setup ? '创建账号' : '欢迎回来'}</h2>
           <form onSubmit={submit}>
             <label>
               账号
@@ -197,13 +160,10 @@ function Auth({
             )}
             <button className="button primary wide" disabled={busy}>
               {busy ? <LoaderCircle className="spin" size={18} /> : null}
-              {setup ? '创建阅读空间' : '进入 CodeSip'}
+              {setup ? '创建账号' : '进入 CodeSip'}
               <ArrowRight size={17} />
             </button>
           </form>
-          <div className="auth-security">
-            <ShieldCheck size={14} /> 代码和笔记保存在你的独立服务中
-          </div>
         </div>
       </section>
     </div>
@@ -746,9 +706,7 @@ export default function App() {
     <div className={`app ${route.id ? 'reading' : ''}`}>
       <aside className="sidebar">
         <Brand />
-        <div className="workspace-label">
-          我的阅读空间 <span>PERSONAL</span>
-        </div>
+        <div className="workspace-label">资料库</div>
         <nav>
           <button
             className={route.kind === 'code' ? 'selected' : ''}
@@ -765,29 +723,15 @@ export default function App() {
             学习笔记<span>{libraries.filter((l) => l.kind === 'notes').length}</span>
           </button>
         </nav>
-        <div className="sidebar-note">
-          <span className="tiny-label">A LITTLE EVERY DAY</span>
-          <Coffee size={28} />
-          <p>今天，也读懂一点点。</p>
-          <span>让知识从屏幕走进脑海。</span>
-        </div>
         <div className="sidebar-bottom">
-          <div className="server-state">
-            <span className={offline ? 'dot offline' : 'dot'} />
-            {offline ? '离线阅读模式' : '私人空间 · 已连接'}
-            <button
-              className="icon-button"
-              onClick={() => setDark(!dark)}
-              aria-label="切换明暗主题"
-            >
-              {dark ? <Sun size={17} /> : <Moon size={17} />}
-            </button>
-          </div>
+          <button className="theme-switch" onClick={() => setDark(!dark)} aria-label="切换明暗主题">
+            {dark ? <Sun size={17} /> : <Moon size={17} />}
+            <span>{dark ? '浅色外观' : '深色外观'}</span>
+          </button>
           <div className="profile">
             <div className="avatar">{user.username[0].toUpperCase()}</div>
             <div>
               <strong>{user.username}</strong>
-              <span>给自己留一杯代码的时间</span>
             </div>
             <button
               className="icon-button"
@@ -819,13 +763,9 @@ export default function App() {
             )}
           </div>
           <div className="top-actions">
-            {offline ? (
+            {offline && (
               <span className="offline-label">
                 <WifiOff size={14} /> 离线
-              </span>
-            ) : (
-              <span className="private-label">
-                <ShieldCheck size={14} /> 私人阅读空间
               </span>
             )}
             <button
@@ -843,63 +783,23 @@ export default function App() {
         </header>
         {!route.id ? (
           <div className="dashboard">
-            <section className="welcome">
-              <div>
-                <div className="eyebrow">
-                  <span />
-                  {route.kind === 'code'
-                    ? 'READ. THINK. UNDERSTAND.'
-                    : 'CAPTURE ON DESKTOP. READ ANYWHERE.'}
-                </div>
-                <h1>
-                  {route.kind === 'code' ? (
-                    <>
-                      留一点时间，<span className="title-rest">读懂代码。</span>
-                    </>
-                  ) : (
-                    <>
-                      好想法，<span className="title-rest">随时翻一翻。</span>
-                    </>
-                  )}
-                </h1>
-                <p>
-                  {route.kind === 'code'
-                    ? '项目结构、关键实现，把复杂的思路慢慢理清。'
-                    : '让电脑上的积累，成为口袋里随时可读的知识。'}
-                </p>
-              </div>
-              <div className="welcome-art" aria-hidden="true">
-                <div className="scene-contours" />
-                <div className="art-orbit" />
-                <div className="art-paper">
-                  <span />
-                  <span />
-                  <span />
-                  <Code2 size={32} />
-                </div>
-                <div className="art-cup">
-                  <Coffee size={50} strokeWidth={1.3} />
-                </div>
-                <div className="art-dot" />
-              </div>
-            </section>
-            <section className="library-section">
-              <div className="section-heading">
-                <div>
-                  <h2>
-                    {route.kind === 'code' ? '我的项目' : '我的笔记库'}
-                    <span>{visibleLibraries.length}</span>
-                  </h2>
-                  <p>
-                    {route.kind === 'code'
-                      ? '从目录开始，循着思路往下读。'
-                      : '你整理的知识，都在这里。'}
-                  </p>
-                </div>
-                <div className="section-actions">
+            <section className={`welcome welcome-${route.kind}`} aria-labelledby="collection-title">
+              <img
+                className="welcome-image"
+                src={route.kind === 'code' ? '/art/code-study.webp' : '/art/notes-study.webp'}
+                alt=""
+                fetchPriority="high"
+              />
+              <div className="welcome-copy">
+                <span className="welcome-count">
+                  {libraries.filter((library) => library.kind === route.kind).length}
+                  {route.kind === 'code' ? ' 个项目' : ' 个笔记库'}
+                </span>
+                <h1 id="collection-title">{route.kind === 'code' ? '代码项目' : '学习笔记'}</h1>
+                <div className="collection-actions">
                   {route.kind === 'notes' && (
                     <button
-                      className="button secondary"
+                      className="button primary"
                       disabled={offline}
                       onClick={() => {
                         setToken('');
@@ -912,7 +812,7 @@ export default function App() {
                     </button>
                   )}
                   <button
-                    className="button primary"
+                    className={`button ${route.kind === 'notes' ? 'secondary' : 'primary'}`}
                     disabled={offline}
                     onClick={() => {
                       setZip(null);
@@ -925,11 +825,13 @@ export default function App() {
                   </button>
                 </div>
               </div>
+            </section>
+            <section className="library-section">
               <div className="library-toolbar">
                 <label className="search-input">
                   <Search size={17} />
                   <input
-                    aria-label="查找项目"
+                    aria-label={route.kind === 'code' ? '查找项目' : '查找笔记库'}
                     placeholder={route.kind === 'code' ? '查找项目…' : '查找笔记库…'}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -964,16 +866,10 @@ export default function App() {
                       </div>
                       <h3>{library.name}</h3>
                       <p>
-                        {library.fileCount
-                          ? `${library.fileCount} 个文件 · ${formatBytes(library.totalBytes)}`
-                          : '等待第一篇笔记同步'}
+                        {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
                       </p>
                       <div className="card-divider" />
                       <div className="card-footer">
-                        <span>
-                          <span className="small-dot" />
-                          {library.kind === 'code' ? '源码项目' : 'Markdown 笔记'}
-                        </span>
                         <span>{relativeDate(library.updatedAt)}</span>
                       </div>
                     </button>
@@ -986,8 +882,7 @@ export default function App() {
                     <span>
                       <Plus size={22} />
                     </span>
-                    <strong>再带上一个{route.kind === 'code' ? '项目' : '笔记库'}</strong>
-                    <p>导入 ZIP，随时接着读</p>
+                    <strong>添加{route.kind === 'code' ? '项目' : '笔记库'}</strong>
                   </button>
                 </div>
               ) : (
@@ -996,18 +891,14 @@ export default function App() {
                     {route.kind === 'code' ? <FolderOpen size={34} /> : <BookOpen size={34} />}
                   </div>
                   <h3>
-                    {query
-                      ? '还没有找到匹配的内容'
-                      : route.kind === 'code'
-                        ? '你的下一次理解，从这里开始'
-                        : '把电脑上的好想法带在身边'}
+                    {query ? '没有匹配的内容' : route.kind === 'code' ? '暂无项目' : '暂无笔记'}
                   </h3>
                   <p>
                     {query
                       ? '换一个关键词试试看。'
                       : route.kind === 'code'
-                        ? '导入一个项目 ZIP，完整目录和源代码就能装进口袋。'
-                        : '连接 Obsidian 自动同步，也可以直接导入笔记 ZIP。'}
+                        ? '导入 ZIP 文件，或打开示例项目。'
+                        : '连接 Obsidian，或导入笔记 ZIP。'}
                   </p>
                   {!query && (
                     <div className="empty-buttons">
@@ -1027,7 +918,7 @@ export default function App() {
                           try {
                             await api('/demo', { method: 'POST' });
                             await refresh();
-                            notify('示例已准备好，随便逛逛');
+                            notify('已添加示例');
                           } catch (e) {
                             handleError(e);
                           } finally {
@@ -1042,14 +933,6 @@ export default function App() {
                 </div>
               )}
             </section>
-            <footer className="dashboard-footer">
-              <span>
-                <Cloud size={15} /> 电脑整理，手机慢慢读
-              </span>
-              <span>
-                CodeSip <span className="footer-dot">·</span> 饭后溜溜码
-              </span>
-            </footer>
           </div>
         ) : (
           <div className="reader-layout">
@@ -1217,7 +1100,7 @@ export default function App() {
                   {fileBusy ? (
                     <div className="reader-empty">
                       <LoaderCircle className="spin" size={25} />
-                      <p>正在翻开这一页…</p>
+                      <p>正在加载…</p>
                     </div>
                   ) : fileError ? (
                     <div className="reader-empty">
@@ -1230,15 +1113,11 @@ export default function App() {
                   ) : !route.file ? (
                     <div className="reader-empty">
                       <BookOpen size={38} />
-                      <h3>
-                        {manifest?.library.kind === 'notes'
-                          ? '等待你的第一篇笔记'
-                          : '从一个文件开始'}
-                      </h3>
+                      <h3>{manifest?.library.kind === 'notes' ? '暂无笔记' : '选择文件'}</h3>
                       <p>
                         {manifest?.library.kind === 'notes'
                           ? '在电脑的 Obsidian 插件中连接这个笔记库。'
-                          : '选择目录中的文件，慢慢读懂它。'}
+                          : '从目录中选择要查看的文件。'}
                       </p>
                       {manifest?.library.kind === 'notes' && (
                         <button
@@ -1390,7 +1269,7 @@ export default function App() {
             >
               <UploadCloud size={34} />
               <strong>{zip ? zip.name : '选择或拖入一个 ZIP 文件'}</strong>
-              <span>{zip ? formatBytes(zip.size) : '保留目录结构，源文件只供阅读'}</span>
+              <span>{zip ? formatBytes(zip.size) : '支持 .zip 格式'}</span>
               <input
                 aria-label="选择 ZIP 文件"
                 type="file"
@@ -1417,9 +1296,7 @@ export default function App() {
             setToken('');
           }}
         >
-          <p className="modal-intro">
-            电脑负责整理，手机负责阅读。连接信息只授权这个笔记库，可随时撤销。
-          </p>
+          <p className="modal-intro">连接信息仅用于当前笔记库，可随时撤销。</p>
           {!manifest && (
             <label className="field">
               笔记库名称

@@ -24,7 +24,7 @@ test('source import, search, note images/links, offline reload and liquid contro
       data: { username: 'browser', password: 'browser-test-password' },
     });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: '留一点时间，读懂代码。' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '代码项目', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '导入项目', exact: true }).click();
   const name = '代码测试-' + info.project.name;
   await page.locator('.modal .field input').fill(name);
