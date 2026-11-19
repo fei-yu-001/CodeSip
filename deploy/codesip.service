@@ -1,0 +1,28 @@
+[Unit]
+Description=CodeSip private code and notes reader
+After=network.target
+
+[Service]
+Type=simple
+User=codesip
+Group=codesip
+WorkingDirectory=/opt/harmonyos/services/codesip/current
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/codesip/codesip.env
+ExecStart=/usr/local/bin/node dist/server/main.mjs
+Restart=on-failure
+RestartSec=5
+StateDirectory=codesip
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/codesip
+MemoryMax=384M
+CPUQuota=50%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

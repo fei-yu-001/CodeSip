@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "CodeSip · 饭后溜溜码",
+  "short_name": "CodeSip",
+  "description": "代码与学习笔记的随身阅读器",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f5f0",
+  "theme_color": "#174e45",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

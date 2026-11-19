@@ -1,0 +1,9 @@
+# CodeSip 鸿蒙客户端
+
+本目录是独立 HarmonyOS Stage / ArkTS 工程，使用 ArkWeb 打开 CodeSip 的 HTTPS 阅读器，包含系统返回、错误重试、同源导航限制和 TLS 校验。账号、源码与笔记显示能力由同一阅读器提供。
+
+用 DevEco Studio 打开本目录，下载适配 SDK 并配置本人签名后安装。项目不包含证书、私钥或用户数据。
+
+当前工具环境提供 API 26 Beta SDK，目标为 API 26，最低兼容 API 12。已使用本机工具链完成未签名构建；可在仓库根目录执行 `./scripts/build-harmony.ps1` 复现。尚未签名或安装到真机。Web 版可以直接在手机浏览器使用。
+
+手机导入 ZIP、系统分享、插件下载和离线存储在 ArkWeb 真机中的表现需要设备验证。第一版优先从电脑端上传源码和安装 Obsidian 插件，手机阅读同一账号的数据。

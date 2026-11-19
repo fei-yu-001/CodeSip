@@ -1,0 +1,9 @@
+{
+  "id": "codesip-sync",
+  "name": "CodeSip Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.6.0",
+  "description": "把选定的笔记和附件单向同步到自己的 CodeSip，手机随时阅读。",
+  "author": "CodeSip",
+  "isDesktopOnly": true
+}

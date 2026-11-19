@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "CodeSip phone application",
+  "main": "",
+  "author": "CodeSip",
+  "license": "GPL-3.0-only",
+  "dependencies": {}
+}

@@ -1,0 +1,7 @@
+{
+  "name": "codesip",
+  "version": "0.1.0",
+  "description": "CodeSip mobile reader",
+  "modelVersion": "6.0.0",
+  "dependencies": {}
+}
