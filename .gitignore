@@ -25,3 +25,4 @@ harmony/oh_modules/
 harmony/**/oh_modules/
 harmony/**/build/
 harmony/local.properties
+harmony/.sign/

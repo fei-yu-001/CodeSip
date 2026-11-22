@@ -4,6 +4,16 @@ import { webview } from '@kit.ArkWeb';
 struct Index {
   private controller: webview.WebviewController = new webview.WebviewController();
   @State failed: boolean = false;
+  aboutToAppear(): void {
+    try {
+      webview.WebCookieManager.configCookieSync('https://codesip.ddyu.online', '');
+    } catch (_) {}
+  }
+  aboutToDisappear(): void {
+    try {
+      webview.WebCookieManager.saveCookieSync();
+    } catch (_) {}
+  }
   build() {
     Stack() {
       Web({ src: 'https://codesip.ddyu.online', controller: this.controller })
@@ -13,7 +23,13 @@ struct Index {
         .fileAccess(false)
         .mixedMode(MixedMode.None)
         .zoomAccess(false)
+        .cacheMode(CacheMode.Default)
         .onPageBegin(() => { this.failed = false; })
+        .onPageEnd(() => {
+          try {
+            webview.WebCookieManager.saveCookieSync();
+          } catch (_) {}
+        })
         .onErrorReceive((event) => {
           if (event && event.request.isMainFrame()) { this.failed = true; }
         })

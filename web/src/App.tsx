@@ -16,6 +16,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CloudOff,
   Code2,
   Copy,
@@ -333,8 +334,19 @@ export default function App() {
     [token, setToken] = useState(''),
     [progress, setProgress] = useState(''),
     [outline, setOutline] = useState<{ name: string; line: number }[]>([]);
-  const [dark, setDark] = useState(localStorage.getItem('codesip:theme') === 'dark'),
-    [wrap, setWrap] = useState(localStorage.getItem('codesip:wrap') === 'true'),
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('codesip:reader-theme') || localStorage.getItem('codesip:theme');
+    return saved === 'warm-slate' || saved === 'dark';
+  });
+  const [theme, setTheme] = useState<'paper-light' | 'warm-slate' | 'sepia-parchment'>(() => {
+    const saved = localStorage.getItem('codesip:reader-theme') || localStorage.getItem('codesip:theme');
+    if (saved === 'warm-slate' || saved === 'dark') return 'warm-slate';
+    if (saved === 'sepia-parchment') return 'sepia-parchment';
+    return 'paper-light';
+  });
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [showEmptyLibs, setShowEmptyLibs] = useState(false);
+  const [wrap, setWrap] = useState(localStorage.getItem('codesip:wrap') !== 'false'),
     [offlineSaved, setOfflineSaved] = useState(false),
     [blobUrl, setBlobUrl] = useState('');
   const notify = useCallback((value: string) => setMessage(value), []);
@@ -373,9 +385,12 @@ export default function App() {
     return () => window.removeEventListener('hashchange', hash);
   }, []);
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    localStorage.setItem('codesip:theme', dark ? 'dark' : 'light');
-  }, [dark]);
+    document.documentElement.setAttribute('data-theme', theme);
+    document.documentElement.dataset.theme = theme === 'warm-slate' ? 'dark' : 'light';
+    setDark(theme === 'warm-slate');
+    localStorage.setItem('codesip:reader-theme', theme);
+    localStorage.setItem('codesip:theme', theme === 'warm-slate' ? 'dark' : 'light');
+  }, [theme]);
   useEffect(() => {
     localStorage.setItem('codesip:wrap', String(wrap));
   }, [wrap]);
@@ -554,6 +569,15 @@ export default function App() {
       ),
     [libraries, route.kind, query],
   );
+  const { activeLibraries, emptyLibraries } = useMemo(() => {
+    const active: Library[] = [];
+    const empty: Library[] = [];
+    for (const lib of visibleLibraries) {
+      if (lib.fileCount > 0) active.push(lib);
+      else empty.push(lib);
+    }
+    return { activeLibraries: active, emptyLibraries: empty };
+  }, [visibleLibraries]);
   const tree = useMemo(
     () =>
       makeTree(
@@ -724,9 +748,13 @@ export default function App() {
           </button>
         </nav>
         <div className="sidebar-bottom">
-          <button className="theme-switch" onClick={() => setDark(!dark)} aria-label="切换明暗主题">
-            {dark ? <Sun size={17} /> : <Moon size={17} />}
-            <span>{dark ? '浅色外观' : '深色外观'}</span>
+          <button
+            className="theme-switch"
+            onClick={() => setTheme(theme === 'warm-slate' ? 'paper-light' : 'warm-slate')}
+            aria-label="切换明暗主题"
+          >
+            {theme === 'warm-slate' ? <Sun size={17} /> : <Moon size={17} />}
+            <span>{theme === 'warm-slate' ? '素笺暖白' : '松烟暖灰'}</span>
           </button>
           <div className="profile">
             <div className="avatar">{user.username[0].toUpperCase()}</div>
@@ -778,6 +806,19 @@ export default function App() {
               }}
             >
               <RefreshCw size={17} />
+            </button>
+            <button
+              className="icon-button user-profile-btn"
+              aria-label="账号与退出"
+              title={`当前账号：${user.username} (点击退出)`}
+              onClick={async () => {
+                if (window.confirm(`当前登录账号：${user.username}\n确定要退出登录吗？`)) {
+                  if (!offline) await api('/auth/logout', { method: 'POST' }).catch(() => {});
+                  await logoutLocal();
+                }
+              }}
+            >
+              <div className="avatar-mini">{user.username[0].toUpperCase()}</div>
             </button>
           </div>
         </header>
@@ -847,44 +888,89 @@ export default function App() {
                 </span>
               </div>
               {visibleLibraries.length ? (
-                <div className="library-grid">
-                  {visibleLibraries.map((library, i) => (
-                    <button
-                      className="library-card"
-                      key={library.id}
-                      onClick={() => setRouteTo(library.kind, library.id)}
-                    >
-                      <div className="card-top">
-                        <div className={`project-icon shade-${i % 3}`}>
-                          {library.kind === 'code' ? (
-                            <FolderOpen size={24} />
-                          ) : (
-                            <BookOpen size={23} />
-                          )}
+                <>
+                  <div className="library-grid">
+                    {(activeLibraries.length > 0 ? activeLibraries : visibleLibraries).map((library, i) => (
+                      <button
+                        className="library-card"
+                        key={library.id}
+                        onClick={() => setRouteTo(library.kind, library.id)}
+                      >
+                        <div className="card-top">
+                          <div className={`project-icon shade-${i % 3}`}>
+                            {library.kind === 'code' ? (
+                              <FolderOpen size={24} />
+                            ) : (
+                              <BookOpen size={23} />
+                            )}
+                          </div>
+                          <ArrowRight size={19} />
                         </div>
-                        <ArrowRight size={19} />
-                      </div>
-                      <h3>{library.name}</h3>
-                      <p>
-                        {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
-                      </p>
-                      <div className="card-divider" />
-                      <div className="card-footer">
-                        <span>{relativeDate(library.updatedAt)}</span>
-                      </div>
+                        <h3>{library.name}</h3>
+                        <p>
+                          {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
+                        </p>
+                        <div className="card-divider" />
+                        <div className="card-footer">
+                          <span>{relativeDate(library.updatedAt)}</span>
+                        </div>
+                      </button>
+                    ))}
+                    <button
+                      className="add-card"
+                      disabled={offline}
+                      onClick={() => setModal('import')}
+                    >
+                      <span>
+                        <Plus size={22} />
+                      </span>
+                      <strong>添加{route.kind === 'code' ? '项目' : '笔记库'}</strong>
                     </button>
-                  ))}
-                  <button
-                    className="add-card"
-                    disabled={offline}
-                    onClick={() => setModal('import')}
-                  >
-                    <span>
-                      <Plus size={22} />
-                    </span>
-                    <strong>添加{route.kind === 'code' ? '项目' : '笔记库'}</strong>
-                  </button>
-                </div>
+                  </div>
+
+                  {activeLibraries.length > 0 && emptyLibraries.length > 0 && (
+                    <div className="empty-libs-fold">
+                      <button
+                        type="button"
+                        className="empty-libs-fold-toggle"
+                        onClick={() => setShowEmptyLibs(!showEmptyLibs)}
+                      >
+                        <span>空库 / 未同步目录 ({emptyLibraries.length})</span>
+                        {showEmptyLibs ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                      {showEmptyLibs && (
+                        <div className="library-grid folded-grid">
+                          {emptyLibraries.map((library, i) => (
+                            <button
+                              className="library-card"
+                              key={library.id}
+                              onClick={() => setRouteTo(library.kind, library.id)}
+                            >
+                              <div className="card-top">
+                                <div className={`project-icon shade-${i % 3}`}>
+                                  {library.kind === 'code' ? (
+                                    <FolderOpen size={24} />
+                                  ) : (
+                                    <BookOpen size={23} />
+                                  )}
+                                </div>
+                                <ArrowRight size={19} />
+                              </div>
+                              <h3>{library.name}</h3>
+                              <p>
+                                {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
+                              </p>
+                              <div className="card-divider" />
+                              <div className="card-footer">
+                                <span>{relativeDate(library.updatedAt)}</span>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="empty-library">
                   <div className="empty-icon">
@@ -1218,6 +1304,13 @@ export default function App() {
       </main>
       <nav className="mobile-nav">
         <button
+          className={route.kind === 'notes' ? 'active' : ''}
+          onClick={() => setRouteTo('notes')}
+        >
+          <BookOpen size={20} />
+          学习笔记
+        </button>
+        <button
           className={route.kind === 'code' ? 'active' : ''}
           onClick={() => setRouteTo('code')}
         >
@@ -1225,25 +1318,67 @@ export default function App() {
           代码项目
         </button>
         <button
-          className={route.kind === 'notes' ? 'active' : ''}
-          onClick={() => setRouteTo('notes')}
+          className={themeMenuOpen ? 'active' : ''}
+          onClick={() => setThemeMenuOpen(!themeMenuOpen)}
         >
-          <BookOpen size={20} />
-          学习笔记
-        </button>
-        <button onClick={() => setDark(!dark)}>
-          {dark ? <Sun size={20} /> : <Moon size={20} />}阅读主题
-        </button>
-        <button
-          onClick={async () => {
-            if (!offline) await api('/auth/logout', { method: 'POST' }).catch(() => {});
-            await logoutLocal();
-          }}
-        >
-          <LogOut size={20} />
-          退出
+          {theme === 'warm-slate' ? <Moon size={20} /> : <Sun size={20} />}
+          阅读主题
         </button>
       </nav>
+
+      {themeMenuOpen && (
+        <>
+          <div className="theme-drawer-backdrop" onClick={() => setThemeMenuOpen(false)} />
+          <div className="theme-drawer">
+            <div className="theme-drawer-handle" />
+            <div className="theme-drawer-title">切换阅读主题</div>
+            <div className="theme-drawer-options">
+              <button
+                type="button"
+                className={`theme-drawer-item ${theme === 'paper-light' ? 'active' : ''}`}
+                onClick={() => {
+                  setTheme('paper-light');
+                  setThemeMenuOpen(false);
+                }}
+              >
+                <div className="theme-dot dot-paper" />
+                <div className="theme-item-text">
+                  <strong>素笺暖白</strong>
+                  <span>棉纸柔和底，日光讲义质感</span>
+                </div>
+              </button>
+              <button
+                type="button"
+                className={`theme-drawer-item ${theme === 'warm-slate' ? 'active' : ''}`}
+                onClick={() => {
+                  setTheme('warm-slate');
+                  setThemeMenuOpen(false);
+                }}
+              >
+                <div className="theme-dot dot-slate" />
+                <div className="theme-item-text">
+                  <strong>松烟暖灰</strong>
+                  <span>夜间低对比护眼暗调</span>
+                </div>
+              </button>
+              <button
+                type="button"
+                className={`theme-drawer-item ${theme === 'sepia-parchment' ? 'active' : ''}`}
+                onClick={() => {
+                  setTheme('sepia-parchment');
+                  setThemeMenuOpen(false);
+                }}
+              >
+                <div className="theme-dot dot-sepia" />
+                <div className="theme-item-text">
+                  <strong>羊皮纸棕</strong>
+                  <span>沉浸古籍温润色调</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </>
+      )}
       {modal === 'import' && (
         <Modal
           title={route.kind === 'code' ? '导入代码项目' : '导入笔记库'}

@@ -716,8 +716,18 @@ textarea::placeholder {
     border-radius: 22px;
     overflow: hidden;
   }
+  .reading .reader-layout {
+    height: calc(100dvh - 56px - env(safe-area-inset-bottom));
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+  .reading .mobile-nav {
+    display: none !important;
+  }
   .reading .main {
-    background: linear-gradient(160deg, #e5eeea, #d9e7df);
+    background: #faf7ee;
+    padding-bottom: 0;
   }
   .document-toolbar {
     min-height: 56px;

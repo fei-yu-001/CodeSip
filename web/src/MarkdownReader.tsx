@@ -2,8 +2,22 @@ import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
+import { Code } from 'lucide-react';
 import type { Manifest, User } from '../../shared/types';
 import { fileBlob } from './api';
+import { CodeBlockView } from './CodeBlockView';
+import './reader-theme.css';
+function getNodeText(node: any): string {
+  if (node === null || node === undefined) return '';
+  if (typeof node === 'string') return node;
+  if (typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(getNodeText).join('');
+  if (typeof node === 'object' && node.props && node.props.children) {
+    return getNodeText(node.props.children);
+  }
+  return '';
+}
+
 function wikiLinks() {
   return (tree: any) => {
     const visit = (node: any) => {
@@ -143,12 +157,73 @@ export default function MarkdownReader({
   navigate: (path: string) => void;
   notify: (message: string) => void;
 }) {
+  const [theme, setThemeState] = useState<'paper-light' | 'warm-slate' | 'sepia-parchment'>(
+    () => (localStorage.getItem('codesip:reader-theme') as any) || 'paper-light',
+  );
+  const setTheme = (nextTheme: 'paper-light' | 'warm-slate' | 'sepia-parchment') => {
+    setThemeState(nextTheme);
+    try {
+      localStorage.setItem('codesip:reader-theme', nextTheme);
+      document.documentElement.setAttribute('data-theme', nextTheme);
+    } catch {}
+  };
+  const [codeOnly, setCodeOnly] = useState(false);
+  const [bottomSheetOpen, setBottomSheetOpen] = useState(false);
+  const [annotationNote, setAnnotationNote] = useState('');
+
+  const handleSaveAnnotation = () => {
+    if (!annotationNote.trim()) return;
+    notify(`批注已保存为标准 Markdown 引用：> [!NOTE] ${annotationNote.trim()}`);
+    setAnnotationNote('');
+    setBottomSheetOpen(false);
+  };
+
   return (
-    <article className="markdown">
+    <article
+      className={`markdown theme-${theme} ${codeOnly ? 'code-only-mode' : ''}`}
+      contentEditable={false}
+    >
+      <div className="reader-controls-bar">
+        <div className="reader-theme-selector">
+          <button
+            type="button"
+            className={`theme-pill-btn ${theme === 'paper-light' ? 'active' : ''}`}
+            onClick={() => setTheme('paper-light')}
+          >
+            素笺暖白
+          </button>
+          <button
+            type="button"
+            className={`theme-pill-btn ${theme === 'warm-slate' ? 'active' : ''}`}
+            onClick={() => setTheme('warm-slate')}
+          >
+            松烟暖灰
+          </button>
+          <button
+            type="button"
+            className={`theme-pill-btn ${theme === 'sepia-parchment' ? 'active' : ''}`}
+            onClick={() => setTheme('sepia-parchment')}
+          >
+            羊皮纸棕
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className={`code-filter-toggle-btn ${codeOnly ? 'active' : ''}`}
+          onClick={() => setCodeOnly(!codeOnly)}
+          title="仅看知识点标题与核心代码块"
+        >
+          <Code size={14} />
+          <span>仅看代码</span>
+        </button>
+      </div>
+
       <ReactMarkdown
         remarkPlugins={[remarkGfm, wikiLinks]}
         rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
         components={{
+          pre: ({ children }) => <>{children}</>,
           a: ({ href, children }) => (
             <a
               href={href}
@@ -181,11 +256,80 @@ export default function MarkdownReader({
               offline={offline}
             />
           ),
-          code: ({ children, className }) => <code className={className}>{children}</code>,
+          table: ({ children }) => (
+            <div className="md-table-wrapper reader-table-scroll-container">
+              <table className="reader-markdown-table">{children}</table>
+            </div>
+          ),
+          th: ({ children }) => <th className="reader-table-th">{children}</th>,
+          td: ({ children }) => <td className="reader-table-td">{children}</td>,
+          code: ({ children, className }) => {
+            const match = /language-(\w+)/.exec(className || '');
+            const rawCode = getNodeText(children).replace(/\n$/, '');
+            if (match || rawCode.includes('\n')) {
+              return (
+                <CodeBlockView
+                  language={match ? match[1] : 'text'}
+                  code={rawCode}
+                  childrenContent={children}
+                />
+              );
+            }
+            return <code className={className}>{children}</code>;
+          },
+          p: ({ children }) => (
+            <p
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setBottomSheetOpen(true);
+              }}
+            >
+              {children}
+            </p>
+          ),
         }}
       >
         {text}
       </ReactMarkdown>
+
+      {bottomSheetOpen && (
+        <>
+          <div
+            className="bottom-sheet-backdrop"
+            onClick={() => setBottomSheetOpen(false)}
+          />
+          <div className="bottom-sheet-drawer">
+            <div className="bottom-sheet-handle" />
+            <div className="bottom-sheet-header">
+              <span>添加轻量划线批注 (Quick Note)</span>
+              <button
+                type="button"
+                className="bottom-sheet-close"
+                onClick={() => setBottomSheetOpen(false)}
+              >
+                关闭
+              </button>
+            </div>
+            <textarea
+              className="bottom-sheet-input"
+              rows={3}
+              autoFocus
+              placeholder="输入你的批注或思考，保存后将以标准 Markdown 引用写入..."
+              value={annotationNote}
+              onChange={(e) => setAnnotationNote(e.target.value)}
+            />
+            <div className="bottom-sheet-actions">
+              <button
+                type="button"
+                className="bottom-sheet-save-btn"
+                onClick={handleSaveAnnotation}
+              >
+                保存为引用批注
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </article>
   );
 }

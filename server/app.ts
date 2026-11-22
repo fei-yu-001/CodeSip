@@ -75,7 +75,7 @@ export async function buildApp(options: AppOptions) {
     }
     if (
       !req.url.startsWith('/api/') ||
-      ['/api/health', '/api/status', '/api/auth/setup', '/api/auth/login'].includes(
+      ['/api/health', '/api/status', '/api/auth/setup', '/api/auth/login', '/api/v1/auth/login'].includes(
         req.url.split('?')[0],
       )
     )
@@ -138,6 +138,80 @@ export async function buildApp(options: AppOptions) {
       return { user };
     },
   );
+  app.post<{
+    Body: {
+      username: string;
+      password: string;
+      device_id: string;
+      device_name?: string;
+      platform?: string;
+    };
+  }>('/api/v1/auth/login', authLimit, async (req, reply) => {
+    const user = await store.login(req.body?.username, req.body?.password);
+    const deviceId = req.body?.device_id || 'unknown-device';
+    const deviceName = req.body?.device_name || 'My Device';
+    const platform = req.body?.platform || 'web';
+    const reg = store.syncServer.registerDevice(user.id, deviceId, deviceName, platform);
+    const token = store.session(user.id);
+    setSession(reply, user);
+    return {
+      access_token: token,
+      refresh_token: token,
+      device_secret: reg.device_secret,
+      user,
+    };
+  });
+  app.get<{ Querystring: { since_seq?: string; limit?: string } }>(
+    '/api/v1/sync/changes',
+    async (req) => {
+      const sinceSeq = parseInt(req.query.since_seq || '0', 10) || 0;
+      const limit = parseInt(req.query.limit || '200', 10) || 200;
+      return store.syncServer.getChanges(req.identity!.user.id, sinceSeq, limit);
+    },
+  );
+  app.post<{ Body: { hashes: string[] } }>('/api/v1/assets/check', async (req) => {
+    const hashes = Array.isArray(req.body?.hashes) ? req.body.hashes : [];
+    const missing = store.syncServer.checkMissingAssets(req.identity!.user.id, hashes);
+    const uploadUrls: Record<string, string> = {};
+    for (const h of missing) uploadUrls[h] = `/api/v1/assets/upload?hash=${encodeURIComponent(h)}`;
+    return { missing_hashes: missing, upload_urls: uploadUrls };
+  });
+  app.post<{ Querystring: { hash?: string } }>('/api/v1/assets/upload', async (req) => {
+    const part = await req.file();
+    if (!part) throw new ApiError(400, '缺少资产文件');
+    const bytes = await part.toBuffer();
+    const hash = req.query.hash || digest(bytes);
+    store.syncServer.saveAsset(req.identity!.user.id, hash, bytes);
+    return { ok: true, hash };
+  });
+  app.get<{ Params: { hash: string } }>('/api/v1/assets/:hash', async (req, reply) => {
+    const content = store.syncServer.getAsset(req.identity!.user.id, req.params.hash);
+    if (!content) throw new ApiError(404, '资产不存在');
+    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    return reply.type('image/png').send(content);
+  });
+  app.post<{
+    Body: {
+      device_id: string;
+      notes: Array<{
+        note_id: string;
+        file_path: string;
+        content: string;
+        content_hash: string;
+        is_deleted?: number;
+      }>;
+    };
+  }>('/api/v1/sync/push', async (req) => {
+    if (!req.body?.device_id || !Array.isArray(req.body?.notes)) {
+      throw new ApiError(400, '请求数据格式不正确');
+    }
+    const results = store.syncServer.pushNotes(
+      req.identity!.user.id,
+      req.body.device_id,
+      req.body.notes,
+    );
+    return { results };
+  });
   app.get('/api/session', async (req) => ({ user: req.identity!.user }));
   app.post('/api/auth/logout', async (req, reply) => {
     if (req.cookies.codesip_session)
