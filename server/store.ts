@@ -21,11 +21,13 @@ import {
 } from './paths';
 import type { ImportedFile } from './zip';
 import { SyncServerStore } from './syncServer';
+import { AnnotationStore } from './annotations';
 const scrypt = promisify(scryptCallback);
 export const digest = (input: string | Buffer) => createHash('sha256').update(input).digest('hex');
 export class Store {
   db: DatabaseSync;
   syncServer: SyncServerStore;
+  annotations: AnnotationStore;
   constructor(filename: string) {
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new DatabaseSync(filename);
@@ -39,6 +41,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS library_owner ON libraries(user_id);
       CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires);
     `);
+    this.annotations = new AnnotationStore(this);
   }
   get needsSetup() {
     return (this.db.prepare('SELECT count(*) n FROM users').get() as any).n === 0;

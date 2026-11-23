@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { Code } from 'lucide-react';
+import { Code, MessageSquarePlus } from 'lucide-react';
+import { AnnotationPanel, type AnnotationTarget } from './AnnotationPanel';
+import { readerKey, trackReadingPosition, type ReaderTheme, type OutlineItem } from './readerState';
 import type { Manifest, User } from '../../shared/types';
 import { fileBlob } from './api';
 import { CodeBlockView } from './CodeBlockView';
@@ -16,6 +18,22 @@ function getNodeText(node: any): string {
     return getNodeText(node.props.children);
   }
   return '';
+}
+
+function readerPositions() {
+  return (tree: any) => {
+    const visit = (node: any) => {
+      if (
+        node.type === 'element' &&
+        /^(h[1-6]|p|pre|blockquote|table|li)$/.test(node.tagName) &&
+        node.position
+      ) {
+        node.properties = { ...node.properties, 'data-source-line': node.position.start.line };
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
 }
 
 function wikiLinks() {
@@ -148,6 +166,11 @@ export default function MarkdownReader({
   offline,
   navigate,
   notify,
+  theme,
+  setTheme,
+  line,
+  jump,
+  onOutline,
 }: {
   text: string;
   path: string;
@@ -156,30 +179,49 @@ export default function MarkdownReader({
   offline: boolean;
   navigate: (path: string) => void;
   notify: (message: string) => void;
+  theme: ReaderTheme;
+  setTheme: (theme: ReaderTheme) => void;
+  line?: number;
+  jump: number;
+  onOutline: (items: OutlineItem[]) => void;
 }) {
-  const [theme, setThemeState] = useState<'paper-light' | 'warm-slate' | 'sepia-parchment'>(
-    () => (localStorage.getItem('codesip:reader-theme') as any) || 'paper-light',
-  );
-  const setTheme = (nextTheme: 'paper-light' | 'warm-slate' | 'sepia-parchment') => {
-    setThemeState(nextTheme);
-    try {
-      localStorage.setItem('codesip:reader-theme', nextTheme);
-      document.documentElement.setAttribute('data-theme', nextTheme);
-    } catch {}
-  };
   const [codeOnly, setCodeOnly] = useState(false);
-  const [bottomSheetOpen, setBottomSheetOpen] = useState(false);
-  const [annotationNote, setAnnotationNote] = useState('');
-
-  const handleSaveAnnotation = () => {
-    if (!annotationNote.trim()) return;
-    notify(`批注已保存为标准 Markdown 引用：> [!NOTE] ${annotationNote.trim()}`);
-    setAnnotationNote('');
-    setBottomSheetOpen(false);
-  };
+  const [target, setTarget] = useState<AnnotationTarget | null>(null);
+  const articleRef = useRef<HTMLElement>(null);
+  const identity = { userId: user.id, libraryId: manifest.library.id, path };
+  const positionKey = readerKey('position', identity);
+  useEffect(() => {
+    const article = articleRef.current;
+    if (!article) return;
+    onOutline(
+      Array.from(
+        article.querySelectorAll<HTMLElement>('.markdown-content :is(h1,h2,h3,h4,h5,h6)'),
+      ).map((heading) => ({
+        name: heading.textContent || '',
+        line: Number(heading.dataset.sourceLine),
+        level: Number(heading.tagName.slice(1)),
+      })),
+    );
+    return trackReadingPosition(article, positionKey, line === undefined);
+  }, [text, positionKey, onOutline]);
+  useEffect(() => {
+    const article = articleRef.current;
+    if (!article || line === undefined) return;
+    setCodeOnly(false);
+    const frame = requestAnimationFrame(() => {
+      const blocks = Array.from(article.querySelectorAll<HTMLElement>('[data-source-line]'));
+      const block =
+        blocks.filter((element) => Number(element.dataset.sourceLine) <= line).at(-1) || blocks[0];
+      if (block)
+        article.scrollTop +=
+          block.getBoundingClientRect().top - article.getBoundingClientRect().top - 16;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [line, jump, text]);
 
   return (
     <article
+      ref={articleRef}
       className={`markdown theme-${theme} ${codeOnly ? 'code-only-mode' : ''}`}
       contentEditable={false}
     >
@@ -210,6 +252,15 @@ export default function MarkdownReader({
 
         <button
           type="button"
+          className="code-filter-toggle-btn"
+          aria-label="添加笔记批注"
+          onClick={() => setTarget({ line: 1, snippet: path })}
+        >
+          <MessageSquarePlus size={14} />
+          <span>批注</span>
+        </button>
+        <button
+          type="button"
           className={`code-filter-toggle-btn ${codeOnly ? 'active' : ''}`}
           onClick={() => setCodeOnly(!codeOnly)}
           title="仅看知识点标题与核心代码块"
@@ -219,117 +270,96 @@ export default function MarkdownReader({
         </button>
       </div>
 
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, wikiLinks]}
-        rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
-        components={{
-          pre: ({ children }) => <>{children}</>,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              onClick={(event) => {
-                if (/^https?:\/\/|^mailto:/.test(href || '')) return;
-                event.preventDefault();
-                const target = resolveFile(
-                  path,
-                  href || '',
-                  manifest.files.map((f) => f.path),
+      <div className="markdown-content">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, wikiLinks]}
+          rehypePlugins={[
+            [rehypeHighlight, { detect: false, ignoreMissing: true }],
+            readerPositions,
+          ]}
+          components={{
+            pre: ({ children, node }) => (
+              <div className="code-block-source" data-source-line={node?.position?.start.line}>
+                {children}
+              </div>
+            ),
+            a: ({ href, children }) => (
+              <a
+                href={href}
+                onClick={(event) => {
+                  if (/^https?:\/\/|^mailto:/.test(href || '')) return;
+                  event.preventDefault();
+                  const target = resolveFile(
+                    path,
+                    href || '',
+                    manifest.files.map((f) => f.path),
+                  );
+                  if (target) {
+                    navigate(target);
+                    if (href?.includes('#')) notify('已打开目标笔记，可通过目录定位章节');
+                  } else notify('未找到链接目标，请确认该笔记已同步且名称唯一');
+                }}
+                target={/^https?:\/\//.test(href || '') ? '_blank' : undefined}
+                rel="noopener noreferrer"
+              >
+                {children}
+              </a>
+            ),
+            img: ({ src, alt }) => (
+              <VaultImage
+                src={typeof src === 'string' ? src : undefined}
+                alt={alt}
+                user={user}
+                manifest={manifest}
+                path={path}
+                offline={offline}
+              />
+            ),
+            table: ({ children, node }) => (
+              <div
+                className="md-table-wrapper reader-table-scroll-container"
+                data-source-line={node?.position?.start.line}
+              >
+                <table className="reader-markdown-table">{children}</table>
+              </div>
+            ),
+            th: ({ children }) => <th className="reader-table-th">{children}</th>,
+            td: ({ children }) => <td className="reader-table-td">{children}</td>,
+            code: ({ children, className }) => {
+              const match = /language-(\w+)/.exec(className || '');
+              const rawCode = getNodeText(children).replace(/\n$/, '');
+              if (match || rawCode.includes('\n')) {
+                return (
+                  <CodeBlockView
+                    language={match ? match[1] : 'text'}
+                    code={rawCode}
+                    childrenContent={children}
+                  />
                 );
-                if (target) {
-                  navigate(target);
-                  if (href?.includes('#')) notify('已打开目标笔记；标题和块定位将在后续版本支持');
-                } else notify('未找到链接目标，请确认该笔记已同步且名称唯一');
-              }}
-              target={/^https?:\/\//.test(href || '') ? '_blank' : undefined}
-              rel="noopener noreferrer"
-            >
-              {children}
-            </a>
-          ),
-          img: ({ src, alt }) => (
-            <VaultImage
-              src={typeof src === 'string' ? src : undefined}
-              alt={alt}
-              user={user}
-              manifest={manifest}
-              path={path}
-              offline={offline}
-            />
-          ),
-          table: ({ children }) => (
-            <div className="md-table-wrapper reader-table-scroll-container">
-              <table className="reader-markdown-table">{children}</table>
-            </div>
-          ),
-          th: ({ children }) => <th className="reader-table-th">{children}</th>,
-          td: ({ children }) => <td className="reader-table-td">{children}</td>,
-          code: ({ children, className }) => {
-            const match = /language-(\w+)/.exec(className || '');
-            const rawCode = getNodeText(children).replace(/\n$/, '');
-            if (match || rawCode.includes('\n')) {
-              return (
-                <CodeBlockView
-                  language={match ? match[1] : 'text'}
-                  code={rawCode}
-                  childrenContent={children}
-                />
-              );
-            }
-            return <code className={className}>{children}</code>;
-          },
-          p: ({ children }) => (
-            <p
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setBottomSheetOpen(true);
-              }}
-            >
-              {children}
-            </p>
-          ),
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-
-      {bottomSheetOpen && (
-        <>
-          <div
-            className="bottom-sheet-backdrop"
-            onClick={() => setBottomSheetOpen(false)}
-          />
-          <div className="bottom-sheet-drawer">
-            <div className="bottom-sheet-handle" />
-            <div className="bottom-sheet-header">
-              <span>添加轻量划线批注 (Quick Note)</span>
-              <button
-                type="button"
-                className="bottom-sheet-close"
-                onClick={() => setBottomSheetOpen(false)}
+              }
+              return <code className={className}>{children}</code>;
+            },
+            p: ({ children, node }) => (
+              <p
+                data-source-line={node?.position?.start.line}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setTarget({
+                    line: node?.position?.start.line || 1,
+                    snippet:
+                      window.getSelection()?.toString().trim() || e.currentTarget.textContent || '',
+                  });
+                }}
               >
-                关闭
-              </button>
-            </div>
-            <textarea
-              className="bottom-sheet-input"
-              rows={3}
-              autoFocus
-              placeholder="输入你的批注或思考，保存后将以标准 Markdown 引用写入..."
-              value={annotationNote}
-              onChange={(e) => setAnnotationNote(e.target.value)}
-            />
-            <div className="bottom-sheet-actions">
-              <button
-                type="button"
-                className="bottom-sheet-save-btn"
-                onClick={handleSaveAnnotation}
-              >
-                保存为引用批注
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+                {children}
+              </p>
+            ),
+          }}
+        >
+          {text}
+        </ReactMarkdown>
+      </div>
+      <AnnotationPanel identity={identity} target={target} setTarget={setTarget} notify={notify} />
     </article>
   );
 }

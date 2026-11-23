@@ -69,3 +69,19 @@ export interface SyncStateRecord {
   last_pulled_seq: number;
 }
 
+export interface ReaderAnnotation {
+  id: string;
+  path: string;
+  line: number;
+  snippet: string;
+  note: string;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface AnnotationWrite {
+  path: string;
+  line: number;
+  snippet: string;
+  note: string;
+  expectedUpdatedAt: number | null;
+}

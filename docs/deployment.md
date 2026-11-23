@@ -6,7 +6,7 @@
 
 `deploy/install.py` 在变更前后分别验证已有游戏健康接口，只读取状态。只在 nginx 配置测试通过后 reload，不 restart 游戏服务。失败时恢复 CodeSip 的旧发布链接和站点配置。
 
-## 发布
+## 首次部署
 
 1. 本地通过类型检查、集成测试、浏览器测试和构建。
 2. `npm run release` 输出 `.local/codesip-release.tar.gz` 与首次部署的私有环境配置。
@@ -16,6 +16,19 @@
 6. 清理上传用的临时环境文件；保留本地 `.local/first-login.md` 供本人首次设置账号。
 
 `install.py` 依赖 Node.js 24+、nginx、Python 3.12+，以及可运行 systemd 的 Linux 主机。安装 npm 包时使用 CodeSip 专用用户，运行服务限制在 384 MB 内存和 50% 单核 CPU。
+
+## 更新现有服务
+
+已有 CodeSip 服务使用 `deploy/update.py`。此脚本只切换 CodeSip 的发布目录和重启 `codesip`，不会重写 nginx 配置或环境文件。
+
+1. 完成类型、后台、构建与浏览器验证后，执行 `npm run release`，记录输出的 SHA-256。
+2. 通过工作区私有服务器入口，将发布包与 `deploy/update.py` 上传到服务器专用临时目录，无需上传凭据。
+3. 执行 `sudo python3 update.py codesip-release.tar.gz <SHA-256>`。
+4. 脚本验证包校验值和文件范围，创建新的发布目录；锁文件一致时复用已安装依赖，否则以 CodeSip 用户安装生产依赖。
+5. 在切换前通过 SQLite 在线备份接口备份并校验数据库；切换后验证本地 API、公开 HTTPS、批注表及现有游戏健康状态。若验证失败，恢复旧发布链接并重启 CodeSip。
+6. 返回的发布标识、备份文件名和校验值同时保存在新发布目录的 `verification.json`，便于后续核对。
+
+手机端通过既有 HTTPS 地址获取新版阅读器。联网重新打开应用后检查功能；不要通过清除应用数据来更新，以免丢失尚未同步的本机草稿。
 
 ## 查看状态与备份
 

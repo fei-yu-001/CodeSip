@@ -9,7 +9,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { Store, digest } from './store';
 import { ApiError, MAX_ARCHIVE } from './paths';
 import { readArchive } from './zip';
-import type { User, SyncPatch } from '../shared/types';
+import type { User, SyncPatch, AnnotationWrite } from '../shared/types';
 export interface AppOptions {
   database: string;
   setupToken: string;
@@ -33,6 +33,19 @@ export async function buildApp(options: AppOptions) {
       : false,
     bodyLimit: 12 * 1024 * 1024,
     trustProxy: '127.0.0.1',
+  });
+  app.setErrorHandler((error, req, reply) => {
+    const e = error as Error & { statusCode?: number };
+    const status = e.statusCode && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 500;
+    if (status === 500) req.log.error({ err: e }, 'request failed');
+    reply.code(status).send({
+      error:
+        status === 500
+          ? '服务暂时无法完成请求，请稍后重试'
+          : status === 429
+            ? '操作太频繁，请稍后再试'
+            : e.message,
+    });
   });
   const store = new Store(options.database);
   let settingUp = false;
@@ -75,9 +88,13 @@ export async function buildApp(options: AppOptions) {
     }
     if (
       !req.url.startsWith('/api/') ||
-      ['/api/health', '/api/status', '/api/auth/setup', '/api/auth/login', '/api/v1/auth/login'].includes(
-        req.url.split('?')[0],
-      )
+      [
+        '/api/health',
+        '/api/status',
+        '/api/auth/setup',
+        '/api/auth/login',
+        '/api/v1/auth/login',
+      ].includes(req.url.split('?')[0])
     )
       return;
     const bearer = req.headers.authorization?.startsWith('Bearer ');
@@ -228,6 +245,42 @@ export async function buildApp(options: AppOptions) {
   app.get<{ Params: { id: string } }>('/api/libraries/:id/manifest', async (req) =>
     store.manifest(req.identity!.user.id, req.params.id),
   );
+  const annotationSession = async (req: import('fastify').FastifyRequest) => {
+    if (!req.cookies.codesip_session || req.headers.authorization || req.identity?.libraryId)
+      throw new ApiError(403, '请通过网页登录后管理批注');
+  };
+  app.get<{ Params: { id: string }; Querystring: { path: string } }>(
+    '/api/libraries/:id/annotations',
+    { preHandler: annotationSession },
+    async (req) => ({
+      annotations: store.annotations.list(req.identity!.user.id, req.params.id, req.query.path),
+    }),
+  );
+  app.put<{ Params: { id: string; annotationId: string }; Body: AnnotationWrite }>(
+    '/api/libraries/:id/annotations/:annotationId',
+    { preHandler: annotationSession, bodyLimit: 64 * 1024 },
+    async (req) => ({
+      annotation: store.annotations.put(
+        req.identity!.user.id,
+        req.params.id,
+        req.params.annotationId,
+        req.body,
+      ),
+    }),
+  );
+  app.delete<{ Params: { id: string; annotationId: string }; Body: { expectedUpdatedAt: number } }>(
+    '/api/libraries/:id/annotations/:annotationId',
+    { preHandler: annotationSession, bodyLimit: 1024 },
+    async (req) => {
+      store.annotations.delete(
+        req.identity!.user.id,
+        req.params.id,
+        req.params.annotationId,
+        req.body?.expectedUpdatedAt,
+      );
+      return { ok: true };
+    },
+  );
   app.delete<{ Params: { id: string } }>('/api/libraries/:id', async (req) => {
     store.library(req.identity!.user.id, req.params.id);
     store.db.prepare('DELETE FROM libraries WHERE id=?').run(req.params.id);
@@ -352,20 +405,6 @@ export async function buildApp(options: AppOptions) {
         : reply.sendFile('index.html'),
     );
   }
-  app.setErrorHandler((error, req, reply) => {
-    const e = error as Error & { statusCode?: number };
-    const status = e.statusCode && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 500;
-    if (status === 500) req.log.error({ err: e }, 'request failed');
-    reply
-      .code(status)
-      .send({
-        error:
-          status === 500
-            ? '服务暂时无法完成请求，请稍后重试'
-            : status === 429
-              ? '操作太频繁，请稍后再试'
-              : e.message,
-      });
-  });
+
   return { app, store };
 }

@@ -49,10 +49,18 @@ async function access<T>(
 export const cached = <T>(key: string) => access<T | undefined>('readonly', (s) => s.get(key));
 export const save = (key: string, value: unknown) => access('readwrite', (s) => s.put(value, key));
 export const remove = (key: string) => access('readwrite', (s) => s.delete(key));
-export async function clearPrivateData() {
+export async function clearPrivateData(keepAnnotations = false) {
+  try {
+    window.dispatchEvent(new Event('codesip:private-data-cleared'));
+  } catch {
+    /* ignore in non-window test environments */
+  }
   await access('readwrite', (s) => s.clear());
   for (const key of Object.keys(localStorage))
-    if (key.startsWith('codesip:')) localStorage.removeItem(key);
+    if (key.startsWith('codesip:')) {
+      if (keepAnnotations && key.startsWith('codesip:annotations:')) continue;
+      localStorage.removeItem(key);
+    }
 }
 export const manifestKey = (user: User, id: string) => `${user.id}:manifest:${id}`;
 const blobKey = (user: User, id: string, hash: string) => `${user.id}:blob:${id}:${hash}`;

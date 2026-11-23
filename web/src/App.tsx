@@ -63,11 +63,13 @@ import {
   relativeDate,
   removeLibraryCache,
 } from './api';
+import { readTheme, type ReaderTheme, type OutlineItem } from './readerState';
+import { navigateHash, useDismissibleLayer } from './readerNavigation';
 const CodeReader = lazy(() => import('./CodeReader'));
 
 const MarkdownReader = lazy(() => import('./MarkdownReader'));
 
-type Route = { kind: LibraryKind; id?: string; file?: string; line: number };
+type Route = { kind: LibraryKind; id?: string; file?: string; line?: number };
 const readRoute = (): Route => {
   const [path, query] = location.hash.slice(1).split('?');
   const [kind, id] = path.split('/');
@@ -76,7 +78,7 @@ const readRoute = (): Route => {
     kind: kind === 'notes' ? 'notes' : 'code',
     id: id || undefined,
     file: params.get('file') || undefined,
-    line: Math.max(1, Number(params.get('line')) || 1),
+    line: params.has('line') ? Math.max(1, Math.floor(Number(params.get('line')) || 1)) : undefined,
   };
 };
 function Brand({ small = false }: { small?: boolean }) {
@@ -336,22 +338,16 @@ export default function App() {
     [showSearch, setShowSearch] = useState(false),
     [showTree, setShowTree] = useState(false),
     [showOutline, setShowOutline] = useState(false);
-  const [modal, setModal] = useState<'import' | 'connect' | 'delete' | null>(null),
+  const [modal, setModal] = useState<'import' | 'connect' | 'delete' | 'account' | null>(null),
     [name, setName] = useState(''),
     [zip, setZip] = useState<File | null>(null),
     [token, setToken] = useState(''),
     [progress, setProgress] = useState(''),
-    [outline, setOutline] = useState<{ name: string; line: number }[]>([]);
-  const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem('codesip:reader-theme') || localStorage.getItem('codesip:theme');
-    return saved === 'warm-slate' || saved === 'dark';
-  });
-  const [theme, setTheme] = useState<'paper-light' | 'warm-slate' | 'sepia-parchment'>(() => {
-    const saved = localStorage.getItem('codesip:reader-theme') || localStorage.getItem('codesip:theme');
-    if (saved === 'warm-slate' || saved === 'dark') return 'warm-slate';
-    if (saved === 'sepia-parchment') return 'sepia-parchment';
-    return 'paper-light';
-  });
+    [isRefreshing, setIsRefreshing] = useState(false),
+    [outline, setOutline] = useState<OutlineItem[]>([]);
+  const [theme, setTheme] = useState<ReaderTheme>(readTheme);
+  const dark = theme === 'warm-slate';
+  const [jump, setJump] = useState(0);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const [showEmptyLibs, setShowEmptyLibs] = useState(false);
   const [notesOnly, setNotesOnly] = useState(true);
@@ -361,13 +357,15 @@ export default function App() {
   const notify = useCallback((value: string) => setMessage(value), []);
   const searchSeq = useRef(0);
   const manifestSeq = useRef(0);
-  const setRouteTo = (kind: LibraryKind, id?: string, file?: string, line = 1) => {
-    const query = file ? `?file=${encodeURIComponent(file)}${line > 1 ? `&line=${line}` : ''}` : '';
-    location.hash = `${kind}${id ? '/' + id : ''}${query}`;
+  const setRouteTo = (kind: LibraryKind, id?: string, file?: string, line?: number) => {
+    const query = file
+      ? `?file=${encodeURIComponent(file)}${line !== undefined ? `&line=${line}` : ''}`
+      : '';
+    navigateHash(`${kind}${id ? '/' + id : ''}${query}`);
   };
-  const logoutLocal = useCallback(async () => {
+  const logoutLocal = useCallback(async (preserveDrafts = false) => {
     manifestSeq.current++;
-    await clearPrivateData();
+    await clearPrivateData(preserveDrafts);
     setUser(null);
     setLibraries([]);
     setManifest(undefined);
@@ -376,7 +374,7 @@ export default function App() {
   const handleError = useCallback(
     (error: unknown) => {
       if (error instanceof HttpError && error.status === 401) {
-        void logoutLocal();
+        void logoutLocal(true);
         notify('登录已过期，请重新登录');
       } else notify((error as Error).message || '操作失败，请重试');
     },
@@ -395,10 +393,13 @@ export default function App() {
   }, []);
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-    document.documentElement.dataset.theme = theme === 'warm-slate' ? 'dark' : 'light';
-    setDark(theme === 'warm-slate');
-    localStorage.setItem('codesip:reader-theme', theme);
-    localStorage.setItem('codesip:theme', theme === 'warm-slate' ? 'dark' : 'light');
+    document.documentElement.style.colorScheme = theme === 'warm-slate' ? 'dark' : 'light';
+    try {
+      localStorage.setItem('codesip:reader-theme', theme);
+      localStorage.setItem('codesip:theme', theme === 'warm-slate' ? 'dark' : 'light');
+    } catch {
+      /* Theme changes still work without storage. */
+    }
   }, [theme]);
   useEffect(() => {
     localStorage.setItem('codesip:wrap', String(wrap));
@@ -423,7 +424,7 @@ export default function App() {
               await save('profile', session.user);
             }
           } catch (e) {
-            if (e instanceof HttpError && e.status === 401) await clearPrivateData();
+            if (e instanceof HttpError && e.status === 401) await clearPrivateData(true);
             else throw e;
           }
         }
@@ -510,14 +511,25 @@ export default function App() {
     };
   }, [loadManifest]);
   useEffect(() => {
-    if (!manifest || route.file || !manifest.files.length) return;
-    const remembered = localStorage.getItem(`codesip:reading:${manifest.library.id}`);
+    if (
+      !user ||
+      !route.id ||
+      !manifest ||
+      manifest.library.id !== route.id ||
+      route.file ||
+      !manifest.files.length
+    )
+      return;
+    const remembered =
+      localStorage.getItem(`codesip:reading:${user!.id}:${manifest.library.id}`) ||
+      localStorage.getItem(`codesip:reading:${manifest.library.id}`);
     const target =
       manifest.files.find((f) => f.path === remembered) ||
       manifest.files.find((f) => /^readme\.md$/i.test(f.path)) ||
       manifest.files.find((f) => f.isText);
-    if (target) setRouteTo(route.kind, route.id, target.path);
-  }, [manifest, route.file]);
+    if (target)
+      navigateHash(`${route.kind}/${route.id}?file=${encodeURIComponent(target.path)}`, true);
+  }, [user, manifest, route.id, route.file]);
   useEffect(() => {
     if (!user || !manifest) return;
     let active = true;
@@ -536,6 +548,7 @@ export default function App() {
     }
     let active = true;
     let objectUrl = '';
+    setText('');
     setFileBusy(true);
     setFileError('');
     setOutline([]);
@@ -554,7 +567,11 @@ export default function App() {
             objectUrl = URL.createObjectURL(blob);
             setBlobUrl(objectUrl);
           } else setBlobUrl('');
-          localStorage.setItem(`codesip:reading:${manifest.library.id}`, file.path);
+          try {
+            localStorage.setItem(`codesip:reading:${user.id}:${manifest.library.id}`, file.path);
+          } catch {
+            /* Reading remains available. */
+          }
         }
       })
       .catch((e) => {
@@ -610,10 +627,12 @@ export default function App() {
   }, [manifest, fileFilter, notesOnly]);
   const currentFile = manifest?.files.find((f) => f.path === route.file);
   const isMarkdown = !!route.file && /\.md(?:own)?$/i.test(route.file);
-  const openFile = (path: string, line = 1) => {
+  const openFile = (path: string, line?: number) => {
+    if (line !== undefined) setJump((value) => value + 1);
     setRouteTo(route.kind, route.id, path, line);
     setShowSearch(false);
     setShowTree(false);
+    setShowOutline(false);
   };
   async function doImport(event: FormEvent) {
     event.preventDefault();
@@ -725,6 +744,13 @@ export default function App() {
       setBusy(false);
     }
   }
+  useDismissibleLayer(showTree, () => setShowTree(false));
+  useDismissibleLayer(showSearch, () => setShowSearch(false));
+  useDismissibleLayer(showOutline, () => setShowOutline(false));
+  useDismissibleLayer(themeMenuOpen, () => setThemeMenuOpen(false));
+  useDismissibleLayer(!!modal, () => {
+    if (!busy) setModal(null);
+  });
   if (boot)
     return (
       <div className="boot">
@@ -785,10 +811,8 @@ export default function App() {
             <button
               className="icon-button"
               aria-label="退出登录"
-              onClick={async () => {
-                if (!offline) await api('/auth/logout', { method: 'POST' }).catch(() => {});
-                await logoutLocal();
-              }}
+              title="管理账号与退出"
+              onClick={() => setModal('account')}
             >
               <LogOut size={16} />
             </button>
@@ -818,26 +842,36 @@ export default function App() {
               </span>
             )}
             <button
-              className="icon-button"
-              aria-label="刷新"
-              disabled={!!progress}
-              onClick={() => {
-                void refresh();
-                if (route.id) void loadManifest();
+              className={`icon-button ${isRefreshing ? 'is-spinning' : ''}`}
+              aria-label={isRefreshing ? '正在刷新' : '刷新'}
+              title={isRefreshing ? '正在刷新…' : '刷新内容'}
+              disabled={!!progress || isRefreshing}
+              onClick={async () => {
+                if (isRefreshing || progress) return;
+                setIsRefreshing(true);
+                try {
+                  await refresh();
+                  if (route.id) await loadManifest();
+                  try {
+                    window.dispatchEvent(new Event('codesip:annotations-refresh'));
+                  } catch {
+                    /* ignore */
+                  }
+                  notify('已刷新最新内容');
+                } catch {
+                  notify('刷新失败，请检查网络');
+                } finally {
+                  setIsRefreshing(false);
+                }
               }}
             >
-              <RefreshCw size={17} />
+              <RefreshCw size={17} className={isRefreshing ? 'spin-icon' : ''} />
             </button>
             <button
               className="icon-button user-profile-btn"
               aria-label="账号与退出"
-              title={`当前账号：${user.username} (点击退出)`}
-              onClick={async () => {
-                if (window.confirm(`当前登录账号：${user.username}\n确定要退出登录吗？`)) {
-                  if (!offline) await api('/auth/logout', { method: 'POST' }).catch(() => {});
-                  await logoutLocal();
-                }
-              }}
+              title={`当前账号：${user.username} (点击管理账号)`}
+              onClick={() => setModal('account')}
             >
               <div className="avatar-mini">{user.username[0].toUpperCase()}</div>
             </button>
@@ -911,32 +945,34 @@ export default function App() {
               {visibleLibraries.length ? (
                 <>
                   <div className="library-grid">
-                    {(activeLibraries.length > 0 ? activeLibraries : visibleLibraries).map((library, i) => (
-                      <button
-                        className="library-card"
-                        key={library.id}
-                        onClick={() => setRouteTo(library.kind, library.id)}
-                      >
-                        <div className="card-top">
-                          <div className={`project-icon shade-${i % 3}`}>
-                            {library.kind === 'code' ? (
-                              <FolderOpen size={24} />
-                            ) : (
-                              <BookOpen size={23} />
-                            )}
+                    {(activeLibraries.length > 0 ? activeLibraries : visibleLibraries).map(
+                      (library, i) => (
+                        <button
+                          className="library-card"
+                          key={library.id}
+                          onClick={() => setRouteTo(library.kind, library.id)}
+                        >
+                          <div className="card-top">
+                            <div className={`project-icon shade-${i % 3}`}>
+                              {library.kind === 'code' ? (
+                                <FolderOpen size={24} />
+                              ) : (
+                                <BookOpen size={23} />
+                              )}
+                            </div>
+                            <ArrowRight size={19} />
                           </div>
-                          <ArrowRight size={19} />
-                        </div>
-                        <h3>{library.name}</h3>
-                        <p>
-                          {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
-                        </p>
-                        <div className="card-divider" />
-                        <div className="card-footer">
-                          <span>{relativeDate(library.updatedAt)}</span>
-                        </div>
-                      </button>
-                    ))}
+                          <h3>{library.name}</h3>
+                          <p>
+                            {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
+                          </p>
+                          <div className="card-divider" />
+                          <div className="card-footer">
+                            <span>{relativeDate(library.updatedAt)}</span>
+                          </div>
+                        </button>
+                      ),
+                    )}
                     <button
                       className="add-card"
                       disabled={offline}
@@ -1147,6 +1183,7 @@ export default function App() {
                     <button
                       className={`icon-button ${wrap ? 'toggled' : ''}`}
                       aria-label="自动换行"
+                      aria-pressed={wrap}
                       title="自动换行"
                       onClick={() => setWrap(!wrap)}
                     >
@@ -1264,6 +1301,12 @@ export default function App() {
                     </div>
                   ) : isMarkdown && currentFile?.isText ? (
                     <MarkdownReader
+                      key={`${user.id}:${manifest!.library.id}:${route.file}`}
+                      theme={theme}
+                      setTheme={setTheme}
+                      line={route.line}
+                      jump={jump}
+                      onOutline={setOutline}
                       text={text}
                       path={route.file}
                       user={user}
@@ -1278,11 +1321,19 @@ export default function App() {
                     </div>
                   ) : currentFile?.isText ? (
                     <CodeReader
+                      key={`${user.id}:${manifest!.library.id}:${route.file}`}
+                      identity={{
+                        userId: user.id,
+                        libraryId: manifest!.library.id,
+                        path: route.file,
+                      }}
+                      notify={notify}
                       text={text}
                       path={route.file}
                       dark={dark}
                       wrap={wrap}
                       line={route.line}
+                      jump={jump}
                       onOutline={setOutline}
                     />
                   ) : (
@@ -1306,14 +1357,20 @@ export default function App() {
                       </button>
                     </div>
                     {isMarkdown ? (
-                      text
-                        .split('\n')
-                        .filter((l) => /^#{1,6} /.test(l))
-                        .map((l, i) => (
-                          <div className="heading-item" key={i}>
-                            {l.replace(/^#+ /, '')}
-                          </div>
+                      outline.length ? (
+                        outline.map((item) => (
+                          <button
+                            key={item.line}
+                            className="heading-item"
+                            style={{ paddingLeft: 12 + ((item.level || 1) - 1) * 10 }}
+                            onClick={() => openFile(route.file!, item.line)}
+                          >
+                            {item.name}
+                          </button>
                         ))
+                      ) : (
+                        <p className="outline-hint">当前笔记没有标题。</p>
+                      )
                     ) : (
                       <>
                         <p className="outline-hint">按文本识别，仅供快速定位</p>
@@ -1581,6 +1638,44 @@ export default function App() {
             >
               {busy ? '删除中…' : '确认删除'}
             </button>
+          </div>
+        </Modal>
+      )}
+      {modal === 'account' && user && (
+        <Modal title="当前账号" close={() => setModal(null)}>
+          <div className="account-dialog-content">
+            <div className="account-info-card">
+              <div className="avatar-large">{user.username[0].toUpperCase()}</div>
+              <div className="account-details">
+                <strong className="account-username">{user.username}</strong>
+                <span className="account-status">
+                  {offline ? '离线模式' : '已连接 CodeSip 服务'}
+                </span>
+              </div>
+            </div>
+            <p className="form-hint">
+              本机离线副本和未同步草稿会清除，已同步内容保留。
+            </p>
+            <div className="modal-buttons">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setModal(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="button danger-fill"
+                onClick={async () => {
+                  setModal(null);
+                  if (!offline) await api('/auth/logout', { method: 'POST' }).catch(() => {});
+                  await logoutLocal();
+                }}
+              >
+                退出登录
+              </button>
+            </div>
           </div>
         </Modal>
       )}
