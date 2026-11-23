@@ -9,7 +9,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { Store, digest } from './store';
 import { ApiError, MAX_ARCHIVE } from './paths';
 import { readArchive } from './zip';
-import type { User, SyncPatch, AnnotationWrite } from '../shared/types';
+import type { User, SyncPatch, AnnotationWrite, DocumentCopyWrite } from '../shared/types';
 export interface AppOptions {
   database: string;
   setupToken: string;
@@ -245,20 +245,34 @@ export async function buildApp(options: AppOptions) {
   app.get<{ Params: { id: string } }>('/api/libraries/:id/manifest', async (req) =>
     store.manifest(req.identity!.user.id, req.params.id),
   );
-  const annotationSession = async (req: import('fastify').FastifyRequest) => {
+  const readerSession = async (req: import('fastify').FastifyRequest) => {
     if (!req.cookies.codesip_session || req.headers.authorization || req.identity?.libraryId)
-      throw new ApiError(403, '请通过网页登录后管理批注');
+      throw new ApiError(403, '请通过网页登录后管理阅读内容');
   };
   app.get<{ Params: { id: string }; Querystring: { path: string } }>(
+    '/api/libraries/:id/document-copy',
+    { preHandler: readerSession },
+    async (req) => ({
+      copy: store.documentCopies.get(req.identity!.user.id, req.params.id, req.query.path),
+    }),
+  );
+  app.put<{ Params: { id: string }; Body: DocumentCopyWrite }>(
+    '/api/libraries/:id/document-copy',
+    { preHandler: readerSession, bodyLimit: 3 * 1024 * 1024 },
+    async (req) => ({
+      copy: store.documentCopies.put(req.identity!.user.id, req.params.id, req.body),
+    }),
+  );
+  app.get<{ Params: { id: string }; Querystring: { path: string } }>(
     '/api/libraries/:id/annotations',
-    { preHandler: annotationSession },
+    { preHandler: readerSession },
     async (req) => ({
       annotations: store.annotations.list(req.identity!.user.id, req.params.id, req.query.path),
     }),
   );
   app.put<{ Params: { id: string; annotationId: string }; Body: AnnotationWrite }>(
     '/api/libraries/:id/annotations/:annotationId',
-    { preHandler: annotationSession, bodyLimit: 64 * 1024 },
+    { preHandler: readerSession, bodyLimit: 64 * 1024 },
     async (req) => ({
       annotation: store.annotations.put(
         req.identity!.user.id,
@@ -270,7 +284,7 @@ export async function buildApp(options: AppOptions) {
   );
   app.delete<{ Params: { id: string; annotationId: string }; Body: { expectedUpdatedAt: number } }>(
     '/api/libraries/:id/annotations/:annotationId',
-    { preHandler: annotationSession, bodyLimit: 1024 },
+    { preHandler: readerSession, bodyLimit: 1024 },
     async (req) => {
       store.annotations.delete(
         req.identity!.user.id,

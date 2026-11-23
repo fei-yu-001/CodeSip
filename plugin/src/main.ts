@@ -228,7 +228,7 @@ class CodeSipSettings extends PluginSettingTab {
     containerEl.addClass('codesip-sync-settings');
     containerEl.createEl('h2', { text: 'CodeSip · 随身阅读' });
     containerEl.createEl('p', {
-      text: '从 CodeSip 的「连接 Obsidian」复制连接信息，电脑写笔记，手机随时查看。',
+      text: '从 CodeSip 的「设置云端同步」复制连接信息，将电脑笔记上传到服务端，供手机阅读。',
       cls: 'codesip-warning',
     });
     let connection = '';

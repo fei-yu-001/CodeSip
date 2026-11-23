@@ -178,7 +178,7 @@ export function applyAppUpdate() {
   if (applying || state.phase !== 'ready') return;
   const before = new Event('codesip:before-update', { cancelable: true });
   if (!window.dispatchEvent(before)) {
-    setState({ message: '请先保存或关闭正在编辑的批注，再重载更新。' });
+    setState({ message: '请先保存或关闭正在编辑的批注或文档，再重载更新。' });
     return;
   }
   applying = true;

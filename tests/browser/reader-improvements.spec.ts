@@ -195,7 +195,12 @@ test('themes stay synchronized across notes, home and reload', async ({ page }, 
     'note.md': '# 主题检查\n\n正文\n\n```ts\nconst value = true;\n```',
   });
   await open(page, lib, 'note.md');
-  await page.locator('.reader-theme-selector').getByRole('button', { name: '松烟暖灰' }).click();
+  await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+  await page.getByRole('button', { name: '松烟暖灰', exact: false }).last().click();
+  await page
+    .getByRole('dialog', { name: '阅读设置' })
+    .getByRole('button', { name: '关闭', exact: true })
+    .click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'warm-slate');
   await page.locator('.breadcrumb').getByRole('button', { name: '学习笔记', exact: true }).click();
   await expect(page).toHaveURL(/#notes$/);
@@ -207,9 +212,18 @@ test('themes stay synchronized across notes, home and reload', async ({ page }, 
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'sepia-parchment');
   }
   await open(page, lib, 'note.md');
-  await page.locator('.reader-theme-selector').getByRole('button', { name: '羊皮纸棕' }).click();
+  await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: '阅读设置' })
+    .getByRole('button', { name: '羊皮纸棕', exact: false })
+    .click();
   await page.reload();
-  await expect(page.locator('.theme-pill-btn.active')).toHaveText('羊皮纸棕');
+  await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+  await expect(page.locator('.reader-theme-option[aria-pressed=true]')).toContainText('羊皮纸棕');
+  await page
+    .getByRole('dialog', { name: '阅读设置' })
+    .getByRole('button', { name: '关闭', exact: true })
+    .click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'sepia-parchment');
   expect(
     await page.evaluate(() =>
@@ -269,9 +283,11 @@ test('back closes sheets and fullscreen, and code-only mode can be turned off', 
   await page.goBack();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(page.url()).toBe(fileURL);
-  await page.getByRole('button', { name: '仅看代码', exact: true }).click();
+  await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+  await page.getByRole('button', { name: '仅看代码', exact: false }).click();
   await expect(page.getByText('普通段落', { exact: true })).toBeHidden();
-  await page.getByRole('button', { name: '仅看代码', exact: true }).click();
+  await page.getByRole('button', { name: '阅读设置', exact: true }).click();
+  await page.getByRole('button', { name: '仅看代码', exact: false }).click();
   await expect(page.getByText('普通段落', { exact: true })).toBeVisible();
   await page.getByTitle('全屏沉浸查看', { exact: true }).click();
   await expect(page.getByRole('dialog', { name: '代码全屏阅读' })).toBeVisible();

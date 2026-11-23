@@ -19,6 +19,9 @@ import {
   ChevronRight,
   ChevronUp,
   CloudOff,
+  Cloud,
+  Laptop,
+  Smartphone,
   Code2,
   Copy,
   Download,
@@ -66,6 +69,7 @@ import {
 import { readTheme, type ReaderTheme, type OutlineItem } from './readerState';
 import { navigateHash, useDismissibleLayer } from './readerNavigation';
 import Modal from './Modal';
+import './sync-setup.css';
 const CodeReader = lazy(() => import('./CodeReader'));
 
 const MarkdownReader = lazy(() => import('./MarkdownReader'));
@@ -276,9 +280,21 @@ export default function App() {
     [name, setName] = useState(''),
     [zip, setZip] = useState<File | null>(null),
     [token, setToken] = useState(''),
+    [createdSyncLibrary, setCreatedSyncLibrary] = useState<Library>(),
     [progress, setProgress] = useState(''),
     [isRefreshing, setIsRefreshing] = useState(false),
     [outline, setOutline] = useState<OutlineItem[]>([]);
+  const syncLibrary =
+    createdSyncLibrary ||
+    (manifest?.library.id === route.id && manifest?.library.kind === 'notes'
+      ? manifest.library
+      : undefined);
+  useEffect(() => {
+    if (modal !== 'connect') {
+      setCreatedSyncLibrary(undefined);
+      setToken('');
+    }
+  }, [modal]);
   const [theme, setTheme] = useState<ReaderTheme>(readTheme);
   const dark = theme === 'warm-slate';
   const [jump, setJump] = useState(0);
@@ -594,7 +610,7 @@ export default function App() {
   async function connect() {
     setBusy(true);
     try {
-      let lib = manifest?.library;
+      let lib = syncLibrary;
       if (!lib || lib.kind !== 'notes') {
         lib = (
           await api<{ library: Library }>('/libraries', {
@@ -602,8 +618,8 @@ export default function App() {
             body: JSON.stringify({ name: name.trim() || '我的学习笔记', kind: 'notes' }),
           })
         ).library;
+        setCreatedSyncLibrary(lib);
         await refresh();
-        setRouteTo('notes', lib.id);
       }
       const data = await api<{ token: string }>(`/libraries/${lib.id}/token`, { method: 'POST' });
       setToken(JSON.stringify({ server: location.origin, libraryId: lib.id, token: data.token }));
@@ -738,7 +754,9 @@ export default function App() {
             <span>{theme === 'warm-slate' ? '素笺暖白' : '松烟暖灰'}</span>
           </button>
           <div className="profile">
-            <div className="avatar">{user.username[0].toUpperCase()}</div>
+            <div className="avatar">
+              <img src="/qiqi-avatar.jpg" alt="七七头像" />
+            </div>
             <div>
               <strong>{user.username}</strong>
             </div>
@@ -807,7 +825,9 @@ export default function App() {
               title={`当前账号：${user.username} (点击管理账号)`}
               onClick={() => setModal('account')}
             >
-              <div className="avatar-mini">{user.username[0].toUpperCase()}</div>
+              <div className="avatar-mini">
+                <img src="/qiqi-avatar.jpg" alt="七七头像" />
+              </div>
             </button>
           </div>
         </header>
@@ -838,7 +858,7 @@ export default function App() {
                       }}
                     >
                       <Link2 size={16} />
-                      连接 Obsidian
+                      设置云端同步
                     </button>
                   )}
                   <button
@@ -975,7 +995,7 @@ export default function App() {
                       ? '换一个关键词试试看。'
                       : route.kind === 'code'
                         ? '导入 ZIP 文件，或打开示例项目。'
-                        : '连接 Obsidian，或导入笔记 ZIP。'}
+                        : '设置云端同步，或导入笔记 ZIP。'}
                   </p>
                   {!query && (
                     <div className="empty-buttons">
@@ -985,7 +1005,7 @@ export default function App() {
                         onClick={() => setModal(route.kind === 'code' ? 'import' : 'connect')}
                       >
                         {route.kind === 'code' ? <UploadCloud size={17} /> : <Link2 size={17} />}{' '}
-                        {route.kind === 'code' ? '导入第一个项目' : '连接 Obsidian'}
+                        {route.kind === 'code' ? '导入第一个项目' : '设置云端同步'}
                       </button>
                       <button
                         className="button text"
@@ -1068,8 +1088,8 @@ export default function App() {
                 </span>
                 {manifest?.library.kind === 'notes' && (
                   <button
-                    title="连接 Obsidian"
-                    aria-label="连接 Obsidian"
+                    title="设置云端同步"
+                    aria-label="设置云端同步"
                     className="icon-button"
                     disabled={offline}
                     onClick={() => {
@@ -1216,7 +1236,7 @@ export default function App() {
                       <h3>{manifest?.library.kind === 'notes' ? '暂无笔记' : '选择文件'}</h3>
                       <p>
                         {manifest?.library.kind === 'notes'
-                          ? '在电脑的 Obsidian 插件中连接这个笔记库。'
+                          ? '在电脑的 Obsidian 插件中上传笔记，再在这里阅读。'
                           : '从目录中选择要查看的文件。'}
                       </p>
                       {manifest?.library.kind === 'notes' && (
@@ -1229,7 +1249,7 @@ export default function App() {
                           }}
                         >
                           <Link2 size={16} />
-                          连接 Obsidian
+                          设置云端同步
                         </button>
                       )}
                     </div>
@@ -1328,7 +1348,8 @@ export default function App() {
                   <span>{currentFile ? formatBytes(currentFile.size) : ''}</span>
                   <span>UTF-8</span>
                   <span>
-                    <ShieldCheck size={12} /> 只读
+                    <ShieldCheck size={12} />{' '}
+                    {manifest?.library.kind === 'notes' ? '原文保护' : '只读'}
                   </span>
                 </div>
               </footer>
@@ -1461,16 +1482,45 @@ export default function App() {
       )}
       {modal === 'connect' && (
         <Modal
-          title="连接 Obsidian"
+          title="设置云端同步"
           close={() => {
+            if (busy) return;
             setModal(null);
             setToken('');
           }}
         >
-          <p className="modal-intro">连接信息仅用于当前笔记库，可随时撤销。</p>
-          {!manifest && (
+          <p className="modal-intro">电脑上传笔记到 CodeSip 服务，手机从服务端读取。</p>
+          <div
+            className="sync-route"
+            role="img"
+            aria-label="同步路径：电脑 Obsidian → CodeSip 服务端 → 手机阅读"
+          >
+            <div>
+              <Laptop size={21} />
+              <strong>电脑</strong>
+              <small>Obsidian</small>
+            </div>
+            <ArrowRight size={16} aria-hidden="true" />
+            <div>
+              <Cloud size={21} />
+              <strong>服务端</strong>
+              <small>CodeSip</small>
+            </div>
+            <ArrowRight size={16} aria-hidden="true" />
+            <div>
+              <Smartphone size={21} />
+              <strong>手机</strong>
+              <small>阅读副本</small>
+            </div>
+          </div>
+          <p className="sync-setup-hint">Obsidian 运行时上传；电脑关机后，已上传的笔记仍可阅读。</p>
+          {syncLibrary ? (
+            <p className="sync-destination">
+              同步到：<strong>{syncLibrary.name}</strong>
+            </p>
+          ) : (
             <label className="field">
-              笔记库名称
+              新笔记库名称
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -1497,7 +1547,7 @@ export default function App() {
               <span>2</span>
               <div>
                 <strong>生成并复制连接信息</strong>
-                <p>粘贴到插件设置，选择同步目录，然后点击「立即同步」。</p>
+                <p>在电脑的 CodeSip Sync 设置中粘贴，选择笔记目录，再点击「同步到 CodeSip」。</p>
                 {token ? (
                   <>
                     <textarea
@@ -1533,13 +1583,24 @@ export default function App() {
               </div>
             </li>
           </ol>
-          {manifest?.library.kind === 'notes' && (
+          {token && syncLibrary && (
+            <button
+              className="button secondary compact"
+              onClick={() => {
+                setModal(null);
+                setRouteTo('notes', syncLibrary.id);
+              }}
+            >
+              打开笔记库
+            </button>
+          )}
+          {syncLibrary && (
             <button
               className="button text danger"
-              disabled={offline}
+              disabled={offline || busy}
               onClick={async () => {
                 try {
-                  await api(`/libraries/${manifest.library.id}/token`, { method: 'DELETE' });
+                  await api(`/libraries/${syncLibrary.id}/token`, { method: 'DELETE' });
                   setToken('');
                   notify('已撤销此笔记库的插件连接');
                 } catch (e) {
@@ -1579,7 +1640,9 @@ export default function App() {
         <Modal title="当前账号" close={() => setModal(null)}>
           <div className="account-dialog-content">
             <div className="account-info-card">
-              <div className="avatar-large">{user.username[0].toUpperCase()}</div>
+              <div className="avatar-large">
+                <img src="/qiqi-avatar.jpg" alt="七七头像" />
+              </div>
               <div className="account-details">
                 <strong className="account-username">{user.username}</strong>
                 <span className="account-status">
@@ -1597,15 +1660,9 @@ export default function App() {
             >
               <RefreshCw size={16} /> 检查应用更新
             </button>
-            <p className="form-hint">
-              本机离线副本和未同步草稿会清除，已同步内容保留。
-            </p>
+            <p className="form-hint">本机离线副本和未同步草稿会清除，已同步内容保留。</p>
             <div className="modal-buttons">
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => setModal(null)}
-              >
+              <button type="button" className="button secondary" onClick={() => setModal(null)}>
                 取消
               </button>
               <button

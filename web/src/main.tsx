@@ -9,6 +9,7 @@ import './reader-theme.css';
 import './styles.css';
 import './glass.css';
 import './collections.css';
+import './reading-experience.css';
 clearStaleLayer();
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

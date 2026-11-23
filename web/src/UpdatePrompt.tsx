@@ -108,7 +108,7 @@ export default function UpdatePrompt() {
                 <p className="modal-intro">
                   {phase === 'downloading'
                     ? '正在下载更新，可以继续阅读。下载完成后由你确认重载。'
-                    : '更新已下载，重载后生效。已保存的批注、离线笔记和阅读位置会保留。'}
+                    : '更新已下载，重载后生效。已保存的批注、文档草稿、离线笔记和阅读位置会保留。'}
                 </p>
                 <div className="update-progress-label">
                   <span>

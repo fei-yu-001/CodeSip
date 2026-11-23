@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Trash2 } from 'lucide-react';
 import { type Annotation, type ReaderIdentity, useAnnotations } from './readerState';
+import Modal from './Modal';
 import { useDismissibleLayer } from './readerNavigation';
 
 export interface AnnotationTarget {
@@ -15,12 +16,16 @@ export function AnnotationPanel({
   setTarget,
   notify,
   code = false,
+  listOpen = false,
+  closeList = () => {},
 }: {
   identity: ReaderIdentity;
   target: AnnotationTarget | null;
   setTarget: (target: AnnotationTarget | null) => void;
   notify: (message: string) => void;
   code?: boolean;
+  listOpen?: boolean;
+  closeList?: () => void;
 }) {
   const { annotations, persist, error, legacy, sync, resolveConflict } = useAnnotations(
     identity,
@@ -34,6 +39,7 @@ export function AnnotationPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const editing = annotations.find((item) => item.id === target?.id);
   const open = !!target || legacyOpen;
+  useDismissibleLayer(listOpen && !open, closeList);
   useDismissibleLayer(open, () => {
     setTarget(null);
     setLegacyOpen(false);
@@ -161,6 +167,43 @@ export function AnnotationPanel({
           )}
         </section>
       )}
+      {listOpen &&
+        !open &&
+        createPortal(
+          <Modal title="批注列表" close={closeList} scrimClassName="reader-sheet-scrim">
+            <div className="reader-annotation-list">
+              {error && <p role="alert">{error}</p>}
+              {!annotations.length && (
+                <p className="editor-help">还没有批注。选中文字后，点底部“批注”记录想法。</p>
+              )}
+              {annotations.map((item) => (
+                <button
+                  type="button"
+                  className="annotation-list-item"
+                  key={item.id}
+                  onClick={() => {
+                    closeList();
+                    setTarget({ line: item.line, snippet: item.snippet, id: item.id });
+                  }}
+                >
+                  <span>
+                    第 {item.line} 行 ·{' '}
+                    {item.syncStatus === 'pending'
+                      ? '待同步'
+                      : item.syncStatus === 'conflict'
+                        ? '有冲突'
+                        : item.syncStatus === 'deleting'
+                          ? '待删除'
+                          : '已同步'}
+                  </span>
+                  <blockquote>{item.snippet}</blockquote>
+                  <p>{item.note}</p>
+                </button>
+              ))}
+            </div>
+          </Modal>,
+          document.body,
+        )}
       {open &&
         createPortal(
           <>

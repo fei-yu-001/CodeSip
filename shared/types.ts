@@ -85,3 +85,16 @@ export interface AnnotationWrite {
   note: string;
   expectedUpdatedAt: number | null;
 }
+
+export interface ReaderDocumentCopy {
+  path: string;
+  content: string;
+  baseHash: string;
+  updatedAt: number;
+}
+export interface DocumentCopyWrite {
+  path: string;
+  content: string;
+  baseHash: string;
+  expectedUpdatedAt: number | null;
+}

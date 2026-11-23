@@ -1,14 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { Code, MessageSquarePlus } from 'lucide-react';
+import { Code, MessageSquarePlus, List, Pencil, SlidersHorizontal } from 'lucide-react';
 import { AnnotationPanel, type AnnotationTarget } from './AnnotationPanel';
 import { readerKey, trackReadingPosition, type ReaderTheme, type OutlineItem } from './readerState';
 import type { Manifest, User } from '../../shared/types';
 import { fileBlob } from './api';
 import { CodeBlockView } from './CodeBlockView';
-import './reader-theme.css';
+import Modal from './Modal';
+import { useDismissibleLayer } from './readerNavigation';
+import { useDocumentCopy } from './documentCopies';
+import { DocumentEditor } from './DocumentEditor';
 function getNodeText(node: any): string {
   if (node === null || node === undefined) return '';
   if (typeof node === 'string') return node;
@@ -185,11 +189,82 @@ export default function MarkdownReader({
   jump: number;
   onOutline: (items: OutlineItem[]) => void;
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [original, setOriginal] = useState(false);
+  const [fontSize, setFontSize] = useState(() => {
+    try {
+      return Math.min(22, Math.max(14, Number(localStorage.getItem('codesip:font-size')) || 17));
+    } catch {
+      return 17;
+    }
+  });
+  const [spacing, setSpacing] = useState(() => {
+    try {
+      return localStorage.getItem('codesip:line-spacing') === 'compact' ? 'compact' : 'relaxed';
+    } catch {
+      return 'relaxed';
+    }
+  });
+  useDismissibleLayer(settingsOpen, () => setSettingsOpen(false));
   const [codeOnly, setCodeOnly] = useState(false);
   const [target, setTarget] = useState<AnnotationTarget | null>(null);
   const articleRef = useRef<HTMLElement>(null);
   const identity = { userId: user.id, libraryId: manifest.library.id, path };
+  const canEdit = manifest.library.kind === 'notes';
+  const sourceHash = manifest.files.find((file) => file.path === path)?.hash || '';
+  const documentCopy = useDocumentCopy(identity, text, sourceHash, canEdit);
+  // Keep the hidden reading surface stable while typing in the editor.
+  const readingText = useRef(documentCopy.content);
+  if (!editorOpen) readingText.current = documentCopy.content;
+  const displayText = original ? text : readingText.current;
   const positionKey = readerKey('position', identity);
+  const selectionRef = useRef<AnnotationTarget | null>(null);
+  const [hasSelection, setHasSelection] = useState(false);
+  useEffect(() => {
+    const selection = () => {
+      const selected = window.getSelection();
+      const node = selected?.anchorNode;
+      if (!node || !articleRef.current?.contains(node)) return;
+      const snippet = selected?.toString().trim();
+      if (!snippet) return;
+      const element = node instanceof Element ? node : node.parentElement;
+      selectionRef.current = {
+        line: Number(element?.closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine) || 1,
+        snippet: snippet.slice(0, 2000),
+      };
+      setHasSelection(true);
+    };
+    document.addEventListener('selectionchange', selection);
+    return () => document.removeEventListener('selectionchange', selection);
+  }, []);
+  const annotate = () => {
+    const article = articleRef.current;
+    const top = article?.getBoundingClientRect().top || 0;
+    const block = Array.from(
+      article?.querySelectorAll<HTMLElement>('.markdown-content [data-source-line]') || [],
+    ).find(
+      (element) =>
+        element.getBoundingClientRect().bottom > top + 8 &&
+        element.getBoundingClientRect().height > 0,
+    );
+    setTarget(
+      selectionRef.current || {
+        line: Number(block?.dataset.sourceLine) || 1,
+        snippet: (block?.textContent || path).slice(0, 2000),
+      },
+    );
+    selectionRef.current = null;
+    setHasSelection(false);
+  };
+  const preference = (key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      notify('阅读设置已应用，本机暂时无法记住设置');
+    }
+  };
   useEffect(() => {
     const article = articleRef.current;
     if (!article) return;
@@ -203,7 +278,7 @@ export default function MarkdownReader({
       })),
     );
     return trackReadingPosition(article, positionKey, line === undefined);
-  }, [text, positionKey, onOutline]);
+  }, [displayText, positionKey, onOutline]);
   useEffect(() => {
     const article = articleRef.current;
     if (!article || line === undefined) return;
@@ -217,149 +292,261 @@ export default function MarkdownReader({
           block.getBoundingClientRect().top - article.getBoundingClientRect().top - 16;
     });
     return () => cancelAnimationFrame(frame);
-  }, [line, jump, text]);
+  }, [line, jump, displayText]);
+
+  // Selection and toolbar state must not recreate the selected DOM nodes.
+  const markdownContent = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, wikiLinks]}
+        rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }], readerPositions]}
+        components={{
+          pre: ({ children, node }) => (
+            <div className="code-block-source" data-source-line={node?.position?.start.line}>
+              {children}
+            </div>
+          ),
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              onClick={(event) => {
+                if (/^https?:\/\/|^mailto:/.test(href || '')) return;
+                event.preventDefault();
+                const target = resolveFile(
+                  path,
+                  href || '',
+                  manifest.files.map((f) => f.path),
+                );
+                if (target) {
+                  navigate(target);
+                  if (href?.includes('#')) notify('已打开目标笔记，可通过目录定位章节');
+                } else notify('未找到链接目标，请确认该笔记已同步且名称唯一');
+              }}
+              target={/^https?:\/\//.test(href || '') ? '_blank' : undefined}
+              rel="noopener noreferrer"
+            >
+              {children}
+            </a>
+          ),
+          img: ({ src, alt }) => (
+            <VaultImage
+              src={typeof src === 'string' ? src : undefined}
+              alt={alt}
+              user={user}
+              manifest={manifest}
+              path={path}
+              offline={offline}
+            />
+          ),
+          table: ({ children, node }) => (
+            <div
+              className="md-table-wrapper reader-table-scroll-container"
+              data-source-line={node?.position?.start.line}
+            >
+              <table className="reader-markdown-table">{children}</table>
+            </div>
+          ),
+          th: ({ children }) => <th className="reader-table-th">{children}</th>,
+          td: ({ children }) => <td className="reader-table-td">{children}</td>,
+          code: ({ children, className }) => {
+            const match = /language-(\w+)/.exec(className || '');
+            const rawCode = getNodeText(children).replace(/\n$/, '');
+            if (match || rawCode.includes('\n')) {
+              return (
+                <CodeBlockView
+                  language={match ? match[1] : 'text'}
+                  code={rawCode}
+                  childrenContent={children}
+                />
+              );
+            }
+            return <code className={className}>{children}</code>;
+          },
+          p: ({ children, node }) => (
+            <p data-source-line={node?.position?.start.line}>{children}</p>
+          ),
+        }}
+      >
+        {displayText}
+      </ReactMarkdown>
+    ),
+    [displayText, path, user, manifest, offline, navigate, notify],
+  );
 
   return (
-    <article
-      ref={articleRef}
-      className={`markdown theme-${theme} ${codeOnly ? 'code-only-mode' : ''}`}
-      contentEditable={false}
-    >
-      <div className="reader-controls-bar">
-        <div className="reader-theme-selector">
-          <button
-            type="button"
-            className={`theme-pill-btn ${theme === 'paper-light' ? 'active' : ''}`}
-            onClick={() => setTheme('paper-light')}
-          >
-            素笺暖白
-          </button>
-          <button
-            type="button"
-            className={`theme-pill-btn ${theme === 'warm-slate' ? 'active' : ''}`}
-            onClick={() => setTheme('warm-slate')}
-          >
-            松烟暖灰
-          </button>
-          <button
-            type="button"
-            className={`theme-pill-btn ${theme === 'sepia-parchment' ? 'active' : ''}`}
-            onClick={() => setTheme('sepia-parchment')}
-          >
-            羊皮纸棕
+    <div className="markdown-reader">
+      {(documentCopy.copy || documentCopy.draft) && (
+        <div className="reading-copy-status">
+          <span>
+            {original ? '电脑原文' : documentCopy.draft ? '我的编辑版 · 本机草稿' : '我的编辑版'}
+            {(documentCopy.draft?.baseHash || documentCopy.copy?.baseHash) !== sourceHash &&
+              ' · 原文有更新'}
+          </span>
+          <button type="button" onClick={() => setOriginal(!original)}>
+            {original ? '查看我的编辑版' : '查看原文'}
           </button>
         </div>
-
+      )}
+      <article
+        ref={articleRef}
+        className={`markdown theme-${theme} ${codeOnly ? 'code-only-mode' : ''}`}
+        style={
+          {
+            '--reader-font-size': `${fontSize}px`,
+            '--reader-line-height': spacing === 'relaxed' ? '1.95' : '1.65',
+          } as CSSProperties
+        }
+        onPointerDown={() => {
+          selectionRef.current = null;
+          setHasSelection(false);
+        }}
+        contentEditable={false}
+      >
+        <div className="markdown-content">{markdownContent}</div>
+        <AnnotationPanel
+          identity={identity}
+          target={target}
+          setTarget={setTarget}
+          notify={notify}
+          listOpen={listOpen}
+          closeList={() => setListOpen(false)}
+        />
+      </article>
+      <nav className="reading-actions" aria-label="阅读操作">
         <button
           type="button"
-          className="code-filter-toggle-btn"
           aria-label="添加笔记批注"
-          onClick={() => setTarget({ line: 1, snippet: path })}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={annotate}
         >
-          <MessageSquarePlus size={14} />
-          <span>批注</span>
+          <MessageSquarePlus size={19} />
+          <span>{hasSelection ? '选段批注' : '批注'}</span>
         </button>
-        <button
-          type="button"
-          className={`code-filter-toggle-btn ${codeOnly ? 'active' : ''}`}
-          onClick={() => setCodeOnly(!codeOnly)}
-          title="仅看知识点标题与核心代码块"
-        >
-          <Code size={14} />
-          <span>仅看代码</span>
+        <button type="button" aria-label="查看批注列表" onClick={() => setListOpen(true)}>
+          <List size={19} />
+          <span>批注列表</span>
         </button>
-      </div>
-
-      <div className="markdown-content">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, wikiLinks]}
-          rehypePlugins={[
-            [rehypeHighlight, { detect: false, ignoreMissing: true }],
-            readerPositions,
-          ]}
-          components={{
-            pre: ({ children, node }) => (
-              <div className="code-block-source" data-source-line={node?.position?.start.line}>
-                {children}
+        {canEdit && (
+          <button
+            type="button"
+            aria-label="编辑文档"
+            disabled={!documentCopy.loaded}
+            onClick={() => {
+              setOriginal(false);
+              setEditorOpen(true);
+            }}
+          >
+            <Pencil size={19} />
+            <span>{documentCopy.draft ? '继续编辑' : '编辑'}</span>
+          </button>
+        )}
+        <button type="button" aria-label="阅读设置" onClick={() => setSettingsOpen(true)}>
+          <SlidersHorizontal size={19} />
+          <span>阅读设置</span>
+        </button>
+      </nav>
+      {settingsOpen &&
+        createPortal(
+          <Modal
+            title="阅读设置"
+            close={() => setSettingsOpen(false)}
+            scrimClassName="reader-sheet-scrim"
+          >
+            <div className="reader-settings">
+              <p className="reader-setting-label">纸张与配色</p>
+              <div className="reader-theme-options">
+                {(
+                  [
+                    ['paper-light', '素笺暖白'],
+                    ['warm-slate', '松烟暖灰'],
+                    ['sepia-parchment', '羊皮纸棕'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`reader-theme-option sample-${value}`}
+                    aria-pressed={theme === value}
+                    onClick={() => setTheme(value)}
+                  >
+                    <span>文</span>
+                    {label}
+                  </button>
+                ))}
               </div>
-            ),
-            a: ({ href, children }) => (
-              <a
-                href={href}
-                onClick={(event) => {
-                  if (/^https?:\/\/|^mailto:/.test(href || '')) return;
-                  event.preventDefault();
-                  const target = resolveFile(
-                    path,
-                    href || '',
-                    manifest.files.map((f) => f.path),
-                  );
-                  if (target) {
-                    navigate(target);
-                    if (href?.includes('#')) notify('已打开目标笔记，可通过目录定位章节');
-                  } else notify('未找到链接目标，请确认该笔记已同步且名称唯一');
-                }}
-                target={/^https?:\/\//.test(href || '') ? '_blank' : undefined}
-                rel="noopener noreferrer"
-              >
-                {children}
-              </a>
-            ),
-            img: ({ src, alt }) => (
-              <VaultImage
-                src={typeof src === 'string' ? src : undefined}
-                alt={alt}
-                user={user}
-                manifest={manifest}
-                path={path}
-                offline={offline}
-              />
-            ),
-            table: ({ children, node }) => (
-              <div
-                className="md-table-wrapper reader-table-scroll-container"
-                data-source-line={node?.position?.start.line}
-              >
-                <table className="reader-markdown-table">{children}</table>
+              <div className="reader-setting-row">
+                <span>正文字号</span>
+                <div className="reader-stepper">
+                  <button
+                    type="button"
+                    aria-label="减小字号"
+                    disabled={fontSize <= 14}
+                    onClick={() => {
+                      setFontSize(fontSize - 1);
+                      preference('codesip:font-size', String(fontSize - 1));
+                    }}
+                  >
+                    A−
+                  </button>
+                  <output aria-label="当前字号">{fontSize}</output>
+                  <button
+                    type="button"
+                    aria-label="增大字号"
+                    disabled={fontSize >= 22}
+                    onClick={() => {
+                      setFontSize(fontSize + 1);
+                      preference('codesip:font-size', String(fontSize + 1));
+                    }}
+                  >
+                    A+
+                  </button>
+                </div>
               </div>
-            ),
-            th: ({ children }) => <th className="reader-table-th">{children}</th>,
-            td: ({ children }) => <td className="reader-table-td">{children}</td>,
-            code: ({ children, className }) => {
-              const match = /language-(\w+)/.exec(className || '');
-              const rawCode = getNodeText(children).replace(/\n$/, '');
-              if (match || rawCode.includes('\n')) {
-                return (
-                  <CodeBlockView
-                    language={match ? match[1] : 'text'}
-                    code={rawCode}
-                    childrenContent={children}
-                  />
-                );
-              }
-              return <code className={className}>{children}</code>;
-            },
-            p: ({ children, node }) => (
-              <p
-                data-source-line={node?.position?.start.line}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setTarget({
-                    line: node?.position?.start.line || 1,
-                    snippet:
-                      window.getSelection()?.toString().trim() || e.currentTarget.textContent || '',
-                  });
+              <div className="reader-setting-row">
+                <span>段落行距</span>
+                <div className="reader-segment">
+                  {[
+                    ['compact', '紧凑'],
+                    ['relaxed', '舒展'],
+                  ].map(([value, label]) => (
+                    <button
+                      type="button"
+                      key={value}
+                      aria-pressed={spacing === value}
+                      onClick={() => {
+                        setSpacing(value);
+                        preference('codesip:line-spacing', value);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="reader-code-filter"
+                aria-pressed={codeOnly}
+                onClick={() => {
+                  setCodeOnly(!codeOnly);
+                  setSettingsOpen(false);
                 }}
               >
-                {children}
-              </p>
-            ),
-          }}
-        >
-          {text}
-        </ReactMarkdown>
-      </div>
-      <AnnotationPanel identity={identity} target={target} setTarget={setTarget} notify={notify} />
-    </article>
+                <Code size={18} />
+                <span>仅看代码</span>
+                <span>{codeOnly ? '已开启' : '已关闭'}</span>
+              </button>
+            </div>
+          </Modal>,
+          document.body,
+        )}
+      <DocumentEditor
+        open={editorOpen}
+        close={() => setEditorOpen(false)}
+        document={documentCopy}
+        path={path}
+        notify={notify}
+      />
+    </div>
   );
 }

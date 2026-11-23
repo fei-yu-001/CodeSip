@@ -79,8 +79,9 @@ def main():
         health('https://codesip.ddyu.online/api/health')
         health('https://jade.ddyu.online/api/health')
         with sqlite3.connect('file:' + str(DATABASE) + '?mode=ro', uri=True) as db:
-            if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='reader_annotations'").fetchone():
-                raise RuntimeError('Annotation table not initialized')
+            for table in ('reader_annotations', 'reader_document_copies'):
+                if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    raise RuntimeError('Reader table not initialized: ' + table)
     except Exception:
         rollback = ROOT / ('rollback-' + release_id)
         rollback.symlink_to(previous)
