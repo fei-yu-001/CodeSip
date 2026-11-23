@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { clearStaleLayer } from './readerNavigation';
 import GlassEffects from './GlassEffects';
+import UpdatePrompt from './UpdatePrompt';
+import { startAppUpdates } from './appUpdates';
 import './reader-theme.css';
 import './styles.css';
 import './glass.css';
@@ -12,9 +14,10 @@ createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
     <GlassEffects />
+    <UpdatePrompt />
   </React.StrictMode>,
 );
-if ('serviceWorker' in navigator && import.meta.env.PROD)
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  });
+if (import.meta.env.PROD) {
+  if (document.readyState === 'complete') startAppUpdates();
+  else window.addEventListener('load', startAppUpdates, { once: true });
+}

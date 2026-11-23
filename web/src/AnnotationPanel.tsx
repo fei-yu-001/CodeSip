@@ -47,7 +47,7 @@ export function AnnotationPanel({
     const previous = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
     const trap = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return;
+      if (event.key !== 'Tab' || !panelRef.current?.contains(document.activeElement)) return;
       const items = panelRef.current?.querySelectorAll<HTMLElement>(
         'button:not(:disabled), textarea',
       );
@@ -72,6 +72,13 @@ export function AnnotationPanel({
     setTarget(null);
     setLegacyOpen(false);
   };
+  useEffect(() => {
+    const beforeUpdate = (event: Event) => {
+      if (target && input !== (baseline?.note || '')) event.preventDefault();
+    };
+    window.addEventListener('codesip:before-update', beforeUpdate);
+    return () => window.removeEventListener('codesip:before-update', beforeUpdate);
+  }, [target, input, baseline]);
   const editorVersion = () => {
     // An acknowledgement of our own unchanged content may advance the version.
     // A remote edit while the drawer is open must still conflict with this draft.

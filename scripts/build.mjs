@@ -21,17 +21,35 @@ const walk = async (dir) =>
       ),
     )
   ).flat();
-const assets = (await walk('dist/web'))
-  .map((f) => '/' + path.relative('dist/web', f).replaceAll('\\', '/'))
-  .filter((f) => !f.endsWith('.map') && f != '/sw.js');
-const version = createHash('sha256')
-  .update(JSON.stringify(assets) + (await readFile('dist/web/index.html', 'utf8')))
-  .digest('hex')
-  .slice(0, 12);
+const shellFiles = (await walk('dist/web'))
+  .filter((file) => !file.endsWith('.map') && !file.endsWith('sw.js'))
+  .sort();
+const workerSource = await readFile('web/service-worker.js', 'utf8');
+const versionHash = createHash('sha256').update(workerSource);
+for (const file of shellFiles) {
+  versionHash.update(path.relative('dist/web', file).replaceAll('\\', '/'));
+  versionHash.update(await readFile(file));
+}
+const version = versionHash.digest('hex').slice(0, 12);
+const index = await readFile('dist/web/index.html', 'utf8');
+await writeFile(
+  'dist/web/index.html',
+  index.replace('<head>', `<head><meta name="codesip-version" content="${version}">`),
+);
+const assets = await Promise.all(
+  shellFiles.map(async (file) => {
+    const bytes = await readFile(file);
+    return {
+      url: '/' + path.relative('dist/web', file).replaceAll('\\', '/'),
+      size: bytes.length,
+      hash: createHash('sha256').update(bytes).digest('hex'),
+    };
+  }),
+);
 await writeFile(
   'dist/web/sw.js',
-  `const CACHE='codesip-shell-${version}';const ASSETS=${JSON.stringify(assets)};\n` +
-    (await readFile('web/service-worker.js', 'utf8')),
+  `const VERSION=${JSON.stringify(version)};const ASSETS=${JSON.stringify(assets)};\n` +
+    workerSource,
 );
 await import('./build-plugin.mjs');
 const { zipSync } = await import('fflate');

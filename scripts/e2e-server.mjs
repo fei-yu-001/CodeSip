@@ -4,11 +4,13 @@ import { spawn } from 'node:child_process';
 const source = `
   import { buildApp } from './server/app.ts';
   import path from 'node:path';
+  import { installUpdateFixtures } from './scripts/e2e-updates.mjs';
   const { app } = await buildApp({
     database: ':memory:', setupToken: 'browser-test-setup-key',
     publicUrl: 'http://127.0.0.1:4319', staticDir: path.resolve('dist/web'),
     rateLimit: false,
   });
+  await installUpdateFixtures(app);
   await app.listen({ host: '127.0.0.1', port: 4319 });
   for (const signal of ['SIGINT', 'SIGTERM'])
     process.on(signal, async () => { await app.close(); process.exit(0); });
