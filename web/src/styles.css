@@ -1332,6 +1332,12 @@ p {
   }
 }
 @media (max-width: 760px) {
+  .app {
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
   .sidebar {
     display: none;
   }

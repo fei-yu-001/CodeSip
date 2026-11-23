@@ -8,6 +8,7 @@ import {
   Suspense,
   type FormEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -27,6 +28,7 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
+  Image as ImageIcon,
   Layers3,
   Link2,
   LoaderCircle,
@@ -224,7 +226,13 @@ function Tree({
             onClick={() => onOpen(node.path)}
             title={node.path}
           >
-            {/\.md$/i.test(node.name) ? <FileText size={15} /> : <FileCode2 size={15} />}
+            {/\.md$/i.test(node.name) ? (
+              <FileText size={15} />
+            ) : /\.(png|jpe?g|webp|gif|svg|avif|bmp|ico)$/i.test(node.name) ? (
+              <ImageIcon size={15} />
+            ) : (
+              <FileCode2 size={15} />
+            )}
             <span>{node.name}</span>
           </button>
         ) : (
@@ -346,6 +354,7 @@ export default function App() {
   });
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const [showEmptyLibs, setShowEmptyLibs] = useState(false);
+  const [notesOnly, setNotesOnly] = useState(true);
   const [wrap, setWrap] = useState(localStorage.getItem('codesip:wrap') !== 'false'),
     [offlineSaved, setOfflineSaved] = useState(false),
     [blobUrl, setBlobUrl] = useState('');
@@ -578,15 +587,27 @@ export default function App() {
     }
     return { activeLibraries: active, emptyLibraries: empty };
   }, [visibleLibraries]);
-  const tree = useMemo(
-    () =>
-      makeTree(
-        (manifest?.files || [])
-          .filter((f) => f.path.toLowerCase().includes(fileFilter.toLowerCase()))
-          .map((f) => f.path),
-      ),
-    [manifest, fileFilter],
-  );
+  const isImageFile = (p: string) => /\.(png|jpe?g|webp|gif|svg|avif|bmp|ico)$/i.test(p);
+  const { noteFiles, assetFiles } = useMemo(() => {
+    const notes: string[] = [];
+    const assets: string[] = [];
+    for (const f of manifest?.files || []) {
+      if (isImageFile(f.path)) assets.push(f.path);
+      else notes.push(f.path);
+    }
+    return { noteFiles: notes, assetFiles: assets };
+  }, [manifest]);
+
+  const tree = useMemo(() => {
+    let paths = (manifest?.files || []).map((f) => f.path);
+    if (manifest?.library.kind === 'notes' && notesOnly) {
+      paths = paths.filter((p) => !isImageFile(p));
+    }
+    if (fileFilter) {
+      paths = paths.filter((p) => p.toLowerCase().includes(fileFilter.toLowerCase()));
+    }
+    return makeTree(paths);
+  }, [manifest, fileFilter, notesOnly]);
   const currentFile = manifest?.files.find((f) => f.path === route.file);
   const isMarkdown = !!route.file && /\.md(?:own)?$/i.test(route.file);
   const openFile = (path: string, line = 1) => {
@@ -1044,6 +1065,24 @@ export default function App() {
                   onChange={(e) => setFileFilter(e.target.value)}
                 />
               </label>
+              {manifest?.library.kind === 'notes' && assetFiles.length > 0 && (
+                <div className="tree-filter-pills">
+                  <button
+                    type="button"
+                    className={`tree-pill ${notesOnly ? 'active' : ''}`}
+                    onClick={() => setNotesOnly(true)}
+                  >
+                    笔记 ({noteFiles.length})
+                  </button>
+                  <button
+                    type="button"
+                    className={`tree-pill ${!notesOnly ? 'active' : ''}`}
+                    onClick={() => setNotesOnly(false)}
+                  >
+                    全部 ({manifest.files.length})
+                  </button>
+                </div>
+              )}
               <div className="tree">
                 {tree.length ? (
                   <Tree nodes={tree} active={route.file} onOpen={openFile} />
@@ -1052,7 +1091,11 @@ export default function App() {
                 )}
               </div>
               <div className="file-panel-bottom">
-                <span>{manifest?.files.length || 0} 个文件</span>
+                <span>
+                  {manifest?.library.kind === 'notes'
+                    ? `${noteFiles.length} 篇笔记${assetFiles.length > 0 ? ` · ${assetFiles.length} 附件` : ''}`
+                    : `${manifest?.files.length || 0} 个文件`}
+                </span>
                 {manifest?.library.kind === 'notes' && (
                   <button
                     title="连接 Obsidian"
@@ -1326,59 +1369,61 @@ export default function App() {
         </button>
       </nav>
 
-      {themeMenuOpen && (
-        <>
-          <div className="theme-drawer-backdrop" onClick={() => setThemeMenuOpen(false)} />
-          <div className="theme-drawer">
-            <div className="theme-drawer-handle" />
-            <div className="theme-drawer-title">切换阅读主题</div>
-            <div className="theme-drawer-options">
-              <button
-                type="button"
-                className={`theme-drawer-item ${theme === 'paper-light' ? 'active' : ''}`}
-                onClick={() => {
-                  setTheme('paper-light');
-                  setThemeMenuOpen(false);
-                }}
-              >
-                <div className="theme-dot dot-paper" />
-                <div className="theme-item-text">
-                  <strong>素笺暖白</strong>
-                  <span>棉纸柔和底，日光讲义质感</span>
-                </div>
-              </button>
-              <button
-                type="button"
-                className={`theme-drawer-item ${theme === 'warm-slate' ? 'active' : ''}`}
-                onClick={() => {
-                  setTheme('warm-slate');
-                  setThemeMenuOpen(false);
-                }}
-              >
-                <div className="theme-dot dot-slate" />
-                <div className="theme-item-text">
-                  <strong>松烟暖灰</strong>
-                  <span>夜间低对比护眼暗调</span>
-                </div>
-              </button>
-              <button
-                type="button"
-                className={`theme-drawer-item ${theme === 'sepia-parchment' ? 'active' : ''}`}
-                onClick={() => {
-                  setTheme('sepia-parchment');
-                  setThemeMenuOpen(false);
-                }}
-              >
-                <div className="theme-dot dot-sepia" />
-                <div className="theme-item-text">
-                  <strong>羊皮纸棕</strong>
-                  <span>沉浸古籍温润色调</span>
-                </div>
-              </button>
+      {themeMenuOpen &&
+        createPortal(
+          <>
+            <div className="theme-drawer-backdrop" onClick={() => setThemeMenuOpen(false)} />
+            <div className="theme-drawer">
+              <div className="theme-drawer-handle" />
+              <div className="theme-drawer-title">切换阅读主题</div>
+              <div className="theme-drawer-options">
+                <button
+                  type="button"
+                  className={`theme-drawer-item ${theme === 'paper-light' ? 'active' : ''}`}
+                  onClick={() => {
+                    setTheme('paper-light');
+                    setThemeMenuOpen(false);
+                  }}
+                >
+                  <div className="theme-dot dot-paper" />
+                  <div className="theme-item-text">
+                    <strong>素笺暖白</strong>
+                    <span>棉纸柔和底，日光讲义质感</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className={`theme-drawer-item ${theme === 'warm-slate' ? 'active' : ''}`}
+                  onClick={() => {
+                    setTheme('warm-slate');
+                    setThemeMenuOpen(false);
+                  }}
+                >
+                  <div className="theme-dot dot-slate" />
+                  <div className="theme-item-text">
+                    <strong>松烟暖灰</strong>
+                    <span>夜间低对比护眼暗调</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className={`theme-drawer-item ${theme === 'sepia-parchment' ? 'active' : ''}`}
+                  onClick={() => {
+                    setTheme('sepia-parchment');
+                    setThemeMenuOpen(false);
+                  }}
+                >
+                  <div className="theme-dot dot-sepia" />
+                  <div className="theme-item-text">
+                    <strong>羊皮纸棕</strong>
+                    <span>沉浸古籍温润色调</span>
+                  </div>
+                </button>
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          </>,
+          document.body,
+        )}
       {modal === 'import' && (
         <Modal
           title={route.kind === 'code' ? '导入代码项目' : '导入笔记库'}
