@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
+import type { Components } from 'hast-util-to-jsx-runtime';
+import { MarkdownChunkView } from './markdown/MarkdownChunkView';
+import { useMarkdownDocument } from './markdown/useMarkdownDocument';
+import { VaultImage } from './VaultImage';
 import { Code, MessageSquarePlus, List, Pencil, SlidersHorizontal } from 'lucide-react';
 import { AnnotationPanel, type AnnotationTarget } from './AnnotationPanel';
 import { readerKey, trackReadingPosition, type ReaderTheme, type OutlineItem } from './readerState';
 import type { Manifest, User } from '../../shared/types';
-import { fileBlob } from './api';
 import { CodeBlockView } from './CodeBlockView';
 import Modal from './Modal';
 import { useDismissibleLayer } from './readerNavigation';
@@ -24,58 +24,6 @@ function getNodeText(node: any): string {
   return '';
 }
 
-function readerPositions() {
-  return (tree: any) => {
-    const visit = (node: any) => {
-      if (
-        node.type === 'element' &&
-        /^(h[1-6]|p|pre|blockquote|table|li)$/.test(node.tagName) &&
-        node.position
-      ) {
-        node.properties = { ...node.properties, 'data-source-line': node.position.start.line };
-      }
-      node.children?.forEach(visit);
-    };
-    visit(tree);
-  };
-}
-
-function wikiLinks() {
-  return (tree: any) => {
-    const visit = (node: any) => {
-      if (!node.children || ['code', 'inlineCode', 'link', 'image'].includes(node.type)) return;
-      node.children = node.children.flatMap((child: any) => {
-        if (child.type !== 'text') {
-          visit(child);
-          return [child];
-        }
-        const pieces: any[] = [];
-        const rx = /(!?)\[\[([^\]]+)\]\]/g;
-        let start = 0;
-        let match;
-        while ((match = rx.exec(child.value))) {
-          if (match.index > start)
-            pieces.push({ type: 'text', value: child.value.slice(start, match.index) });
-          const [target, label] = match[2].split('|');
-          pieces.push(
-            match[1]
-              ? { type: 'image', url: encodeURI(target), alt: label || target }
-              : {
-                  type: 'link',
-                  url: encodeURI(target),
-                  children: [{ type: 'text', value: label || target }],
-                },
-          );
-          start = rx.lastIndex;
-        }
-        if (start < child.value.length)
-          pieces.push({ type: 'text', value: child.value.slice(start) });
-        return pieces.length ? pieces : [child];
-      });
-    };
-    visit(tree);
-  };
-}
 export function resolveFile(source: string, target: string, paths: string[]): string | undefined {
   let decoded: string;
   try {
@@ -100,67 +48,6 @@ export function resolveFile(source: string, target: string, paths: string[]): st
     (p) => p.split('/').pop() === decoded || p.split('/').pop() === decoded + '.md',
   );
   return matches.length === 1 ? matches[0] : undefined;
-}
-function VaultImage({
-  src,
-  alt,
-  user,
-  manifest,
-  path,
-  offline,
-}: {
-  src?: string;
-  alt?: string;
-  user: User;
-  manifest: Manifest;
-  path: string;
-  offline: boolean;
-}) {
-  const [url, setUrl] = useState('');
-  const [error, setError] = useState('');
-  useEffect(() => {
-    let alive = true;
-    let objectUrl = '';
-    setUrl('');
-    setError('');
-    if (!src) return;
-    if (/^https?:\/\//.test(src)) {
-      setError('外部图片未缓存，可在原笔记中查看');
-      return;
-    }
-    const resolved = resolveFile(
-      path,
-      src,
-      manifest.files.map((f) => f.path),
-    );
-    const file = manifest.files.find((f) => f.path === resolved);
-    if (!file || !file.mediaType.startsWith('image/')) {
-      setError('图片未同步');
-      return;
-    }
-    fileBlob(user, manifest.library.id, file, !offline)
-      .then((blob) => {
-        if (alive) {
-          objectUrl = URL.createObjectURL(blob);
-          setUrl(objectUrl);
-        }
-      })
-      .catch((e) => {
-        if (alive) setError(e.message);
-      });
-    return () => {
-      alive = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [src, path, manifest, offline]);
-  return url ? (
-    <img src={url} alt={alt || ''} loading="lazy" />
-  ) : (
-    <span className="image-fallback">
-      {error || '加载图片…'}
-      {alt ? ` · ${alt}` : ''}
-    </span>
-  );
 }
 export default function MarkdownReader({
   text,
@@ -219,6 +106,7 @@ export default function MarkdownReader({
   const readingText = useRef(documentCopy.content);
   if (!editorOpen) readingText.current = documentCopy.content;
   const displayText = original ? text : readingText.current;
+  const parsed = useMarkdownDocument(displayText);
   const positionKey = readerKey('position', identity);
   const selectionRef = useRef<AnnotationTarget | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
@@ -266,111 +154,105 @@ export default function MarkdownReader({
     }
   };
   useEffect(() => {
-    const article = articleRef.current;
-    if (!article) return;
-    onOutline(
-      Array.from(
-        article.querySelectorAll<HTMLElement>('.markdown-content :is(h1,h2,h3,h4,h5,h6)'),
-      ).map((heading) => ({
-        name: heading.textContent || '',
-        line: Number(heading.dataset.sourceLine),
-        level: Number(heading.tagName.slice(1)),
-      })),
-    );
-    return trackReadingPosition(article, positionKey, line === undefined);
-  }, [displayText, positionKey, onOutline]);
+    onOutline(parsed.outline);
+  }, [parsed.outline, onOutline]);
   useEffect(() => {
     const article = articleRef.current;
-    if (!article || line === undefined) return;
+    if (article) return trackReadingPosition(article, positionKey, line === undefined);
+  }, [displayText, positionKey, line === undefined]);
+  const lastJump = useRef<{ text: string; line: number; jump: number } | null>(null);
+  useEffect(() => {
+    const article = articleRef.current;
+    if (!article || line === undefined || !parsed.chunks.length) return;
+    if (
+      lastJump.current?.text === displayText &&
+      lastJump.current.line === line &&
+      lastJump.current.jump === jump
+    )
+      return;
+    // A search or outline click can arrive before its block has streamed in.
+    if (!parsed.done && parsed.chunks.at(-1)!.endLine < line) return;
     setCodeOnly(false);
     const frame = requestAnimationFrame(() => {
       const blocks = Array.from(article.querySelectorAll<HTMLElement>('[data-source-line]'));
       const block =
         blocks.filter((element) => Number(element.dataset.sourceLine) <= line).at(-1) || blocks[0];
-      if (block)
+      if (block) {
         article.scrollTop +=
           block.getBoundingClientRect().top - article.getBoundingClientRect().top - 16;
+        lastJump.current = { text: displayText, line, jump };
+      }
     });
     return () => cancelAnimationFrame(frame);
-  }, [line, jump, displayText]);
+  }, [line, jump, displayText, parsed.chunks.length, parsed.done]);
 
   // Selection and toolbar state must not recreate the selected DOM nodes.
-  const markdownContent = useMemo(
-    () => (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, wikiLinks]}
-        rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }], readerPositions]}
-        components={{
-          pre: ({ children, node }) => (
-            <div className="code-block-source" data-source-line={node?.position?.start.line}>
-              {children}
-            </div>
-          ),
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              onClick={(event) => {
-                if (/^https?:\/\/|^mailto:/.test(href || '')) return;
-                event.preventDefault();
-                const target = resolveFile(
-                  path,
-                  href || '',
-                  manifest.files.map((f) => f.path),
-                );
-                if (target) {
-                  navigate(target);
-                  if (href?.includes('#')) notify('已打开目标笔记，可通过目录定位章节');
-                } else notify('未找到链接目标，请确认该笔记已同步且名称唯一');
-              }}
-              target={/^https?:\/\//.test(href || '') ? '_blank' : undefined}
-              rel="noopener noreferrer"
-            >
-              {children}
-            </a>
-          ),
-          img: ({ src, alt }) => (
-            <VaultImage
-              src={typeof src === 'string' ? src : undefined}
-              alt={alt}
-              user={user}
-              manifest={manifest}
-              path={path}
-              offline={offline}
+  const components = useMemo<Partial<Components>>(
+    () => ({
+      pre: ({ children, node }) => (
+        <div className="code-block-source" data-source-line={node?.position?.start.line}>
+          {children}
+        </div>
+      ),
+      a: ({ href, children }) => (
+        <a
+          href={href}
+          onClick={(event) => {
+            if (/^https?:\/\/|^mailto:/.test(href || '')) return;
+            event.preventDefault();
+            const target = resolveFile(
+              path,
+              href || '',
+              manifest.files.map((f) => f.path),
+            );
+            if (target) {
+              navigate(target);
+              if (href?.includes('#')) notify('已打开目标笔记，可通过目录定位章节');
+            } else notify('未找到链接目标，请确认该笔记已同步且名称唯一');
+          }}
+          target={/^https?:\/\//.test(href || '') ? '_blank' : undefined}
+          rel="noopener noreferrer"
+        >
+          {children}
+        </a>
+      ),
+      img: ({ src, alt }) => (
+        <VaultImage
+          src={typeof src === 'string' ? src : undefined}
+          alt={alt}
+          user={user}
+          manifest={manifest}
+          path={path}
+          offline={offline}
+        />
+      ),
+      table: ({ children, node }) => (
+        <div
+          className="md-table-wrapper reader-table-scroll-container"
+          data-source-line={node?.position?.start.line}
+        >
+          <table className="reader-markdown-table">{children}</table>
+        </div>
+      ),
+      th: ({ children }) => <th className="reader-table-th">{children}</th>,
+      td: ({ children }) => <td className="reader-table-td">{children}</td>,
+      code: ({ children, className }) => {
+        const match = /language-(\w+)/.exec(className || '');
+        const rawCode = getNodeText(children).replace(/\n$/, '');
+        if (match || rawCode.includes('\n')) {
+          return (
+            <CodeBlockView
+              language={match ? match[1] : 'text'}
+              code={rawCode}
+              childrenContent={children}
             />
-          ),
-          table: ({ children, node }) => (
-            <div
-              className="md-table-wrapper reader-table-scroll-container"
-              data-source-line={node?.position?.start.line}
-            >
-              <table className="reader-markdown-table">{children}</table>
-            </div>
-          ),
-          th: ({ children }) => <th className="reader-table-th">{children}</th>,
-          td: ({ children }) => <td className="reader-table-td">{children}</td>,
-          code: ({ children, className }) => {
-            const match = /language-(\w+)/.exec(className || '');
-            const rawCode = getNodeText(children).replace(/\n$/, '');
-            if (match || rawCode.includes('\n')) {
-              return (
-                <CodeBlockView
-                  language={match ? match[1] : 'text'}
-                  code={rawCode}
-                  childrenContent={children}
-                />
-              );
-            }
-            return <code className={className}>{children}</code>;
-          },
-          p: ({ children, node }) => (
-            <p data-source-line={node?.position?.start.line}>{children}</p>
-          ),
-        }}
-      >
-        {displayText}
-      </ReactMarkdown>
-    ),
-    [displayText, path, user, manifest, offline, navigate, notify],
+          );
+        }
+        return <code className={className}>{children}</code>;
+      },
+      p: ({ children, node }) => <p data-source-line={node?.position?.start.line}>{children}</p>,
+    }),
+    [path, user, manifest, offline, navigate, notify],
   );
 
   return (
@@ -402,7 +284,29 @@ export default function MarkdownReader({
         }}
         contentEditable={false}
       >
-        <div className="markdown-content">{markdownContent}</div>
+        <div
+          className="markdown-content"
+          data-render-complete={parsed.done}
+          hidden={!parsed.chunks.length && !parsed.done}
+        >
+          {parsed.chunks.map((chunk, index) => (
+            <MarkdownChunkView key={index} chunk={chunk} components={components} />
+          ))}
+        </div>
+        {parsed.error ? (
+          <p role="alert">
+            正文排版失败。
+            <button type="button" onClick={parsed.retry}>
+              重试
+            </button>
+          </p>
+        ) : (
+          !parsed.done && (
+            <p className="markdown-loading" role="status">
+              {parsed.chunks.length ? '正在加载后续内容…' : '正在排版…'}
+            </p>
+          )
+        )}
         <AnnotationPanel
           identity={identity}
           target={target}
@@ -416,6 +320,7 @@ export default function MarkdownReader({
         <button
           type="button"
           aria-label="添加笔记批注"
+          disabled={!parsed.chunks.length}
           onPointerDown={(e) => e.preventDefault()}
           onClick={annotate}
         >

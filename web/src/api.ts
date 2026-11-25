@@ -49,7 +49,19 @@ async function access<T>(
 export const cached = <T>(key: string) => access<T | undefined>('readonly', (s) => s.get(key));
 export const save = (key: string, value: unknown) => access('readwrite', (s) => s.put(value, key));
 export const remove = (key: string) => access('readwrite', (s) => s.delete(key));
+const privateDataCleaners = new Set<() => void>();
+export function onPrivateDataCleared(cleaner: () => void): () => void {
+  privateDataCleaners.add(cleaner);
+  return () => privateDataCleaners.delete(cleaner);
+}
 export async function clearPrivateData(keepAnnotations = false) {
+  for (const cleaner of privateDataCleaners) {
+    try {
+      cleaner();
+    } catch {
+      /* Cleanup listeners isolate private state across test and browser runs. */
+    }
+  }
   try {
     window.dispatchEvent(new Event('codesip:private-data-cleared'));
   } catch {
@@ -68,18 +80,25 @@ export async function clearPrivateData(keepAnnotations = false) {
 }
 export const manifestKey = (user: User, id: string) => `${user.id}:manifest:${id}`;
 const blobKey = (user: User, id: string, hash: string) => `${user.id}:blob:${id}:${hash}`;
+function abortError(signal?: AbortSignal) {
+  if (signal?.reason instanceof Error) return signal.reason;
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
 export async function fileBlob(
   user: User,
   id: string,
   entry: FileEntry,
   network = true,
+  signal?: AbortSignal,
 ): Promise<Blob> {
+  if (signal?.aborted) throw abortError(signal);
   const hit = await cached<Blob>(blobKey(user, id, entry.hash));
+  if (signal?.aborted) throw abortError(signal);
   if (hit) return hit;
   if (!network) throw new Error('这份文件尚未保存离线副本，请联网后打开');
   const response = await fetch(
     `/api/libraries/${id}/file?path=${encodeURIComponent(entry.path)}&hash=${entry.hash}`,
-    { credentials: 'same-origin' },
+    { credentials: 'same-origin', signal },
   );
   if (!response.ok)
     throw new HttpError(
@@ -87,9 +106,11 @@ export async function fileBlob(
       (await response.json().catch(() => ({ error: '文件读取失败' }))).error,
     );
   const bytes = await response.arrayBuffer();
+  if (signal?.aborted) throw abortError(signal);
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) =>
     b.toString(16).padStart(2, '0'),
   ).join('');
+  if (signal?.aborted) throw abortError(signal);
   if (hash !== entry.hash) throw new Error('文件刚刚更新，请刷新项目后重试');
   return new Blob([bytes], { type: entry.mediaType });
 }

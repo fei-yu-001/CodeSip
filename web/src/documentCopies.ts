@@ -8,6 +8,53 @@ interface CopyState {
   copy: ReaderDocumentCopy | null;
   draft: Draft | null;
 }
+export function sameDocumentCopy(
+  a: ReaderDocumentCopy | null | undefined,
+  b: ReaderDocumentCopy | null | undefined,
+): boolean {
+  const left = a ?? null;
+  const right = b ?? null;
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.path === right.path &&
+    left.content === right.content &&
+    left.baseHash === right.baseHash &&
+    left.updatedAt === right.updatedAt
+  );
+}
+export function sameCopyState(a: CopyState, b: CopyState): boolean {
+  if (a === b) return true;
+  if (!sameDocumentCopy(a.copy, b.copy)) return false;
+  if (a.draft === b.draft) return true;
+  if (!a.draft || !b.draft) return false;
+  return (
+    a.draft.content === b.draft.content &&
+    a.draft.baseHash === b.draft.baseHash &&
+    a.draft.expectedUpdatedAt === b.draft.expectedUpdatedAt
+  );
+}
+export function writeCopyStateToStorage(
+  key: string,
+  next: CopyState,
+  current: CopyState,
+  hadStorageError: boolean,
+): { changed: boolean; ok: boolean } {
+  const unchanged = sameCopyState(current, next);
+  if (unchanged && !hadStorageError) {
+    return { changed: false, ok: true };
+  }
+  try {
+    if (next.copy === null && next.draft === null) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(next));
+    }
+    return { changed: !unchanged, ok: true };
+  } catch {
+    return { changed: !unchanged, ok: false };
+  }
+}
 function read(key: string): CopyState {
   try {
     const value = JSON.parse(localStorage.getItem(key) || 'null');
@@ -38,6 +85,9 @@ export function useDocumentCopy(
     enabled ? read(key) : { copy: null, draft: null },
   );
   const ref = useRef(state);
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
+  const stateMetaRef = useRef({ key, enabled });
   const active = useRef(true);
   const loadingId = useRef(0);
   const saving = useRef(false);
@@ -45,43 +95,68 @@ export function useDocumentCopy(
   const [loaded, setLoaded] = useState(!enabled);
   const [error, setError] = useState('');
   const [storageError, setStorageError] = useState('');
+  const storageErrorRef = useRef(false);
   const [conflict, setConflict] = useState<ReaderDocumentCopy | null>(null);
   const endpoint = `/libraries/${identity.libraryId}/document-copy`;
   const persist = (next: CopyState) => {
     if (!active.current) return false;
-    ref.current = next;
-    setState(next);
-    try {
-      localStorage.setItem(key, JSON.stringify(next));
-      setStorageError('');
-      return true;
-    } catch {
-      setStorageError('本机空间不足，草稿尚未存好。请先保存到云端或下载备份。');
-      return false;
+    const { changed, ok } = writeCopyStateToStorage(
+      key,
+      next,
+      ref.current,
+      storageErrorRef.current,
+    );
+    if (changed) {
+      ref.current = next;
+      setState(next);
     }
+    storageErrorRef.current = !ok;
+    if (ok) {
+      setStorageError((prev) => (prev ? '' : prev));
+      return true;
+    }
+    setStorageError('本机空间不足，草稿尚未存好。请先保存到云端或下载备份。');
+    return false;
   };
   const load = async () => {
     if (!enabled || !active.current || saving.current) return;
     const id = ++loadingId.current;
+    const currentIdentity = identityRef.current;
+    const loadEndpoint = `/libraries/${currentIdentity.libraryId}/document-copy`;
     try {
       const { copy } = await api<{ copy: ReaderDocumentCopy | null }>(
-        `${endpoint}?path=${encodeURIComponent(identity.path)}`,
+        `${loadEndpoint}?path=${encodeURIComponent(currentIdentity.path)}`,
       );
       if (!active.current || id !== loadingId.current) return;
-      persist({ ...ref.current, copy });
-      setError('');
+      if (!sameDocumentCopy(ref.current.copy, copy)) {
+        persist({ ...ref.current, copy });
+      }
+      setError((prev) => (prev ? '' : prev));
     } catch (e) {
       if (!active.current || id !== loadingId.current) return;
-      setError(
+      const nextError =
         e instanceof HttpError && e.status === 401
           ? '登录已过期，草稿保留在本机。请重新登录后保存。'
-          : '暂时无法读取云端编辑版，联网后可重试。',
-      );
+          : '暂时无法读取云端编辑版，联网后可重试。';
+      setError((prev) => (prev === nextError ? prev : nextError));
     } finally {
       if (active.current && id === loadingId.current) setLoaded(true);
     }
   };
   useEffect(() => {
+    if (stateMetaRef.current.key !== key || stateMetaRef.current.enabled !== enabled) {
+      stateMetaRef.current = { key, enabled };
+      const initial = enabled ? read(key) : { copy: null, draft: null };
+      if (!sameCopyState(ref.current, initial)) {
+        ref.current = initial;
+        setState(initial);
+      }
+      setLoaded(!enabled);
+      setError('');
+      storageErrorRef.current = false;
+      setStorageError('');
+      setConflict(null);
+    }
     active.current = true;
     void load();
     const clear = () => {

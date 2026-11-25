@@ -125,6 +125,14 @@ export function trackReadingPosition(element: HTMLElement, key: string, restore 
     clearTimeout(timer);
     timer = setTimeout(flush, 180);
   };
+  // Worker-parsed Markdown mounts progressively; retry saved pixel progress
+  // as its surface grows, without overwriting it with the first short batch.
+  const content = element.querySelector('.markdown-content');
+  const resize =
+    content && typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(restorePosition)
+      : undefined;
+  if (content) resize?.observe(content);
   frame = requestAnimationFrame(restorePosition);
   element.addEventListener('load', restorePosition, true);
   element.addEventListener('scroll', scroll, { passive: true });
@@ -134,6 +142,7 @@ export function trackReadingPosition(element: HTMLElement, key: string, restore 
   document.addEventListener('visibilitychange', flush);
   return () => {
     cancelAnimationFrame(frame);
+    resize?.disconnect();
     flush();
     element.removeEventListener('load', restorePosition, true);
     element.removeEventListener('scroll', scroll);

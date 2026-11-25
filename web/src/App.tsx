@@ -307,12 +307,28 @@ export default function App() {
   const notify = useCallback((value: string) => setMessage(value), []);
   const searchSeq = useRef(0);
   const manifestSeq = useRef(0);
-  const setRouteTo = (kind: LibraryKind, id?: string, file?: string, line?: number) => {
+  const loadedFileRef = useRef<{
+    userId: string;
+    libraryId: string;
+    path: string;
+    hash: string;
+  } | null>(null);
+  const imageObjectUrlRef = useRef('');
+  const releaseImageObjectUrl = useCallback(() => {
+    if (imageObjectUrlRef.current) {
+      URL.revokeObjectURL(imageObjectUrlRef.current);
+      imageObjectUrlRef.current = '';
+    }
+  }, []);
+  useEffect(() => releaseImageObjectUrl, [releaseImageObjectUrl]);
+  const routeScopeRef = useRef({ kind: route.kind, id: route.id });
+  routeScopeRef.current = { kind: route.kind, id: route.id };
+  const setRouteTo = useCallback((kind: LibraryKind, id?: string, file?: string, line?: number) => {
     const query = file
       ? `?file=${encodeURIComponent(file)}${line !== undefined ? `&line=${line}` : ''}`
       : '';
     navigateHash(`${kind}${id ? '/' + id : ''}${query}`);
-  };
+  }, []);
   const logoutLocal = useCallback(async (preserveDrafts = false) => {
     manifestSeq.current++;
     await clearPrivateData(preserveDrafts);
@@ -492,52 +508,83 @@ export default function App() {
   }, [user, manifest]);
   useEffect(() => {
     if (!user || !manifest || !route.file) {
+      loadedFileRef.current = null;
+      releaseImageObjectUrl();
       setText('');
       setBlobUrl('');
+      setFileError('');
+      setFileBusy(false);
       return;
     }
-    let active = true;
-    let objectUrl = '';
-    setText('');
-    setFileBusy(true);
-    setFileError('');
-    setOutline([]);
     const file = manifest.files.find((f) => f.path === route.file);
     if (!file) {
+      loadedFileRef.current = null;
+      releaseImageObjectUrl();
+      setText('');
+      setBlobUrl('');
+      setOutline([]);
       setFileError('这份文件已移动或删除，请从目录重新选择');
       setFileBusy(false);
       return;
     }
-    fileBlob(user, manifest.library.id, file, !offline)
-      .then(async (blob) => {
+    const loaded = loadedFileRef.current;
+    if (
+      loaded &&
+      loaded.userId === user.id &&
+      loaded.libraryId === manifest.library.id &&
+      loaded.path === file.path &&
+      loaded.hash === file.hash
+    ) {
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    loadedFileRef.current = null;
+    releaseImageObjectUrl();
+    setText('');
+    setBlobUrl('');
+    setFileBusy(true);
+    setFileError('');
+    setOutline([]);
+    (async () => {
+      try {
+        const blob = await fileBlob(user, manifest.library.id, file, !offline, controller.signal);
         const value = file.isText ? await blob.text() : '';
-        if (active) {
-          setText(value);
-          if (file.mediaType.startsWith('image/')) {
-            objectUrl = URL.createObjectURL(blob);
-            setBlobUrl(objectUrl);
-          } else setBlobUrl('');
-          try {
-            localStorage.setItem(`codesip:reading:${user.id}:${manifest.library.id}`, file.path);
-          } catch {
-            /* Reading remains available. */
-          }
+        if (!active || controller.signal.aborted) return;
+        loadedFileRef.current = {
+          userId: user.id,
+          libraryId: manifest.library.id,
+          path: file.path,
+          hash: file.hash,
+        };
+        setText(value);
+        if (file.mediaType.startsWith('image/')) {
+          releaseImageObjectUrl();
+          const objectUrl = URL.createObjectURL(blob);
+          imageObjectUrlRef.current = objectUrl;
+          setBlobUrl(objectUrl);
+        } else {
+          setBlobUrl('');
         }
-      })
-      .catch((e) => {
-        if (active) {
-          setFileError(e.message);
-          if (e instanceof HttpError && e.status === 401) handleError(e);
+        try {
+          localStorage.setItem(`codesip:reading:${user.id}:${manifest.library.id}`, file.path);
+        } catch {
+          /* Reading remains available. */
         }
-      })
-      .finally(() => {
+      } catch (e: any) {
+        if (!active || controller.signal.aborted || e?.name === 'AbortError') return;
+        loadedFileRef.current = null;
+        setFileError(e.message);
+        if (e instanceof HttpError && e.status === 401) handleError(e);
+      } finally {
         if (active) setFileBusy(false);
-      });
+      }
+    })();
     return () => {
       active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
     };
-  }, [user, manifest, route.file, offline]);
+  }, [user, manifest, route.file, offline, handleError, releaseImageObjectUrl]);
   const visibleLibraries = useMemo(
     () =>
       libraries.filter(
@@ -577,13 +624,17 @@ export default function App() {
   }, [manifest, fileFilter, notesOnly]);
   const currentFile = manifest?.files.find((f) => f.path === route.file);
   const isMarkdown = !!route.file && /\.md(?:own)?$/i.test(route.file);
-  const openFile = (path: string, line?: number) => {
-    if (line !== undefined) setJump((value) => value + 1);
-    setRouteTo(route.kind, route.id, path, line);
-    setShowSearch(false);
-    setShowTree(false);
-    setShowOutline(false);
-  };
+  const openFile = useCallback(
+    (path: string, line?: number) => {
+      if (line !== undefined) setJump((value) => value + 1);
+      const { kind, id } = routeScopeRef.current;
+      setRouteTo(kind, id, path, line);
+      setShowSearch(false);
+      setShowTree(false);
+      setShowOutline(false);
+    },
+    [setRouteTo],
+  );
   async function doImport(event: FormEvent) {
     event.preventDefault();
     if (!zip) return;
