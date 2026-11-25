@@ -15,6 +15,11 @@ def health(url):
             raise RuntimeError('Health check failed')
         return json.load(response)
 
+def sync_primary_keys(database):
+    with sqlite3.connect('file:' + str(database) + '?mode=ro', uri=True) as db:
+        return {table: [(row[1], row[5]) for row in db.execute('PRAGMA table_info(' + table + ')') if row[5]]
+                for table in ('user_devices', 'server_notes', 'server_assets')}
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -82,7 +87,11 @@ def main():
             for table in ('reader_annotations', 'reader_document_copies'):
                 if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     raise RuntimeError('Reader table not initialized: ' + table)
-    except Exception:
+    except Exception as error:
+        if sync_primary_keys(DATABASE) != sync_primary_keys(backup):
+            raise RuntimeError('CodeSip verification failed after a sync schema migration. '
+                               'Kept the new release and all current data; the previous program is not schema-compatible. '
+                               'Deploy a compatible fix; do not overwrite new data with the backup.') from error
         rollback = ROOT / ('rollback-' + release_id)
         rollback.symlink_to(previous)
         rollback.replace(current)

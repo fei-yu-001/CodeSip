@@ -9,6 +9,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { Store, digest } from './store';
 import { ApiError, MAX_ARCHIVE } from './paths';
 import { readArchive } from './zip';
+import { compressReadingResponse } from './readingTransport';
 import type { User, SyncPatch, AnnotationWrite, DocumentCopyWrite } from '../shared/types';
 export interface AppOptions {
   database: string;
@@ -204,7 +205,7 @@ export async function buildApp(options: AppOptions) {
   app.get<{ Params: { hash: string } }>('/api/v1/assets/:hash', async (req, reply) => {
     const content = store.syncServer.getAsset(req.identity!.user.id, req.params.hash);
     if (!content) throw new ApiError(404, '资产不存在');
-    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    // Authenticated assets must not enter shared caches or survive logout there.
     return reply.type('image/png').send(content);
   });
   app.post<{
@@ -242,8 +243,10 @@ export async function buildApp(options: AppOptions) {
   app.post<{ Body: { name: string; kind: string } }>('/api/libraries', async (req) => ({
     library: store.createLibrary(req.identity!.user.id, req.body?.name, req.body?.kind),
   }));
-  app.get<{ Params: { id: string } }>('/api/libraries/:id/manifest', async (req) =>
-    store.manifest(req.identity!.user.id, req.params.id),
+  app.get<{ Params: { id: string } }>(
+    '/api/libraries/:id/manifest',
+    { onSend: compressReadingResponse },
+    async (req) => store.manifest(req.identity!.user.id, req.params.id),
   );
   const readerSession = async (req: import('fastify').FastifyRequest) => {
     if (!req.cookies.codesip_session || req.headers.authorization || req.identity?.libraryId)
@@ -302,6 +305,7 @@ export async function buildApp(options: AppOptions) {
   });
   app.get<{ Params: { id: string }; Querystring: { path: string } }>(
     '/api/libraries/:id/file',
+    { onSend: compressReadingResponse },
     async (req, reply) => {
       const row = store.file(req.identity!.user.id, req.params.id, req.query.path);
       reply.header('Content-Security-Policy', "default-src 'none'; sandbox");
