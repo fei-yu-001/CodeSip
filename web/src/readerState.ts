@@ -3,18 +3,12 @@ import { annotationStore, parseAnnotations } from './annotationSync';
 export type { Annotation, AnnotationSyncStatus } from './annotationSync';
 
 export type ReaderTheme = 'paper-light' | 'warm-slate' | 'sepia-parchment';
-export interface ReaderIdentity {
-  userId: string;
-  libraryId: string;
-  path: string;
-}
+import { readerKey, type ReaderIdentity } from './readerIdentity';
+export { readerKey, type ReaderIdentity } from './readerIdentity';
 export interface OutlineItem {
   name: string;
   line: number;
   level?: number;
-}
-export function readerKey(kind: string, identity: ReaderIdentity) {
-  return `codesip:${kind}:v2:${identity.userId}:${identity.libraryId}:${encodeURIComponent(identity.path)}`;
 }
 export function readTheme(): ReaderTheme {
   try {
@@ -47,15 +41,7 @@ export function useAnnotations(
     }
   }, [key, includeLegacy]);
   useEffect(() => {
-    store.reload();
-    window.addEventListener('online', store.reload);
-    window.addEventListener('focus', store.reload);
-    window.addEventListener('codesip:annotations-refresh', store.reload);
-    return () => {
-      window.removeEventListener('online', store.reload);
-      window.removeEventListener('focus', store.reload);
-      window.removeEventListener('codesip:annotations-refresh', store.reload);
-    };
+    void store.loadOnce();
   }, [store]);
   return {
     ...snapshot,

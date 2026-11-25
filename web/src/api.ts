@@ -8,9 +8,11 @@ export class HttpError extends Error {
   }
 }
 export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const timeout = AbortSignal.timeout(init.body instanceof FormData ? 180000 : 20000);
   const response = await fetch('/api' + url, {
     credentials: 'same-origin',
     ...init,
+    signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
     headers: {
       ...(init.body && !(init.body instanceof FormData)
         ? { 'Content-Type': 'application/json' }
@@ -30,14 +32,19 @@ function db() {
     const req = indexedDB.open('codesip-reader', 1);
     req.onupgradeneeded = () => req.result.createObjectStore('cache');
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => {
+      dbPromise = undefined;
+      reject(req.error);
+    };
   }));
 }
 async function access<T>(
   mode: IDBTransactionMode,
   operation: (store: IDBObjectStore) => IDBRequest,
 ): Promise<T> {
+  const generation = privateGeneration;
   const database = await db();
+  if (mode === 'readwrite' && generation !== privateGeneration) throw abortError();
   return new Promise((resolve, reject) => {
     const tx = database.transaction('cache', mode);
     const req = operation(tx.objectStore('cache'));
@@ -49,12 +56,15 @@ async function access<T>(
 export const cached = <T>(key: string) => access<T | undefined>('readonly', (s) => s.get(key));
 export const save = (key: string, value: unknown) => access('readwrite', (s) => s.put(value, key));
 export const remove = (key: string) => access('readwrite', (s) => s.delete(key));
+let privateGeneration = 0;
+export const cacheGeneration = () => privateGeneration;
 const privateDataCleaners = new Set<() => void>();
 export function onPrivateDataCleared(cleaner: () => void): () => void {
   privateDataCleaners.add(cleaner);
   return () => privateDataCleaners.delete(cleaner);
 }
 export async function clearPrivateData(keepAnnotations = false) {
+  privateGeneration++;
   for (const cleaner of privateDataCleaners) {
     try {
       cleaner();
@@ -90,15 +100,22 @@ export async function fileBlob(
   entry: FileEntry,
   network = true,
   signal?: AbortSignal,
+  requireStorage = false,
 ): Promise<Blob> {
   if (signal?.aborted) throw abortError(signal);
-  const hit = await cached<Blob>(blobKey(user, id, entry.hash));
+  const generation = privateGeneration;
+  const hit = await cached<Blob>(blobKey(user, id, entry.hash)).catch(() => undefined);
   if (signal?.aborted) throw abortError(signal);
   if (hit) return hit;
   if (!network) throw new Error('这份文件尚未保存离线副本，请联网后打开');
   const response = await fetch(
     `/api/libraries/${id}/file?path=${encodeURIComponent(entry.path)}&hash=${entry.hash}`,
-    { credentials: 'same-origin', signal },
+    {
+      credentials: 'same-origin',
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(45000)])
+        : AbortSignal.timeout(45000),
+    },
   );
   if (!response.ok)
     throw new HttpError(
@@ -111,21 +128,51 @@ export async function fileBlob(
     b.toString(16).padStart(2, '0'),
   ).join('');
   if (signal?.aborted) throw abortError(signal);
-  if (hash !== entry.hash) throw new Error('文件刚刚更新，请刷新项目后重试');
-  return new Blob([bytes], { type: entry.mediaType });
+  if (hash !== entry.hash) throw new Error('文件刚刚更新，请同步后重试');
+  if (generation !== privateGeneration) throw abortError(signal);
+  const blob = new Blob([bytes], { type: entry.mediaType });
+  try {
+    await save(blobKey(user, id, entry.hash), blob);
+  } catch {
+    if (requireStorage) throw new Error('本机存储空间不足，文件未能保存；已有存档保留');
+    window.dispatchEvent(new Event('codesip:cache-write-failed'));
+  }
+  if (generation !== privateGeneration || signal?.aborted) throw abortError(signal);
+  return blob;
 }
 export async function downloadLibrary(
   user: User,
   manifest: Manifest,
   progress: (done: number, total: number) => void,
+  signal?: AbortSignal,
 ) {
-  for (let i = 0; i < manifest.files.length; i++) {
-    const file = manifest.files[i];
-    const blob = await fileBlob(user, manifest.library.id, file);
-    await save(blobKey(user, manifest.library.id, file.hash), blob);
-    progress(i + 1, manifest.files.length);
-  }
+  const generation = privateGeneration;
+  const controller = new AbortController();
+  const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+  let cursor = 0,
+    done = 0;
+  const results = await Promise.allSettled(
+    Array.from({ length: 2 }, async () => {
+      try {
+        while (cursor < manifest.files.length) {
+          if (combined.aborted || generation !== privateGeneration) throw abortError(combined);
+          const file = manifest.files[cursor++];
+          await fileBlob(user, manifest.library.id, file, true, combined, true);
+          progress(++done, manifest.files.length);
+        }
+      } catch (error) {
+        controller.abort();
+        throw error;
+      }
+    }),
+  );
+  const failed = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (failed) throw failed.reason;
+  if (combined.aborted || generation !== privateGeneration) throw abortError(combined);
   await save(manifestKey(user, manifest.library.id), manifest);
+  if (combined.aborted || generation !== privateGeneration) throw abortError(combined);
   await save(`${user.id}:offline:${manifest.library.id}`, {
     revision: manifest.library.revision,
     date: new Date().toISOString(),

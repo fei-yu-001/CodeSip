@@ -58,6 +58,7 @@ import {
   cached,
   save,
   clearPrivateData,
+  cacheGeneration,
   cachedLibraries,
   manifestKey,
   fileBlob,
@@ -69,6 +70,7 @@ import {
 import { readTheme, type ReaderTheme, type OutlineItem } from './readerState';
 import { navigateHash, useDismissibleLayer } from './readerNavigation';
 import Modal from './Modal';
+import { synchronizeLibraryData } from './localSync';
 import './sync-setup.css';
 const CodeReader = lazy(() => import('./CodeReader'));
 
@@ -305,6 +307,16 @@ export default function App() {
     [offlineSaved, setOfflineSaved] = useState(false),
     [blobUrl, setBlobUrl] = useState('');
   const notify = useCallback((value: string) => setMessage(value), []);
+  const syncController = useRef<AbortController | null>(null);
+  const [syncProgress, setSyncProgress] = useState('');
+  useEffect(() => {
+    const failure = () => notify('本机存档未能保存，请检查存储空间；当前内容仍可阅读');
+    window.addEventListener('codesip:cache-write-failed', failure);
+    return () => {
+      window.removeEventListener('codesip:cache-write-failed', failure);
+      syncController.current?.abort();
+    };
+  }, [notify]);
   const searchSeq = useRef(0);
   const manifestSeq = useRef(0);
   const loadedFileRef = useRef<{
@@ -331,6 +343,7 @@ export default function App() {
   }, []);
   const logoutLocal = useCallback(async (preserveDrafts = false) => {
     manifestSeq.current++;
+    syncController.current?.abort();
     await clearPrivateData(preserveDrafts);
     setUser(null);
     setLibraries([]);
@@ -379,6 +392,12 @@ export default function App() {
     let active = true;
     (async () => {
       try {
+        const profile = await cached<User>('profile').catch(() => undefined);
+        if (!active) return;
+        if (profile) {
+          setUser(profile);
+          return;
+        }
         const status = await api<{ needsSetup: boolean }>('/status');
         if (!active) return;
         setNeedsSetup(status.needsSetup);
@@ -411,27 +430,39 @@ export default function App() {
       active = false;
     };
   }, []);
-  const refresh = useCallback(async () => {
-    if (!user) return;
-    try {
-      const data = await api<{ libraries: Library[] }>('/libraries');
-      setLibraries(data.libraries);
-      await save(`${user.id}:libraries`, data.libraries);
-      setOffline(false);
-    } catch (e) {
-      if (!(e instanceof HttpError)) {
-        setLibraries((await cachedLibraries(user)) || []);
-        setOffline(true);
-      } else handleError(e);
-    }
-  }, [user, handleError]);
+  const refresh = useCallback(
+    async (force = false) => {
+      if (!user) return;
+      const generation = cacheGeneration();
+      try {
+        if (!force) {
+          const local = await cachedLibraries(user);
+          if (generation !== cacheGeneration()) return;
+          if (local) {
+            setLibraries(local);
+            return;
+          }
+        }
+        const data = await api<{ libraries: Library[] }>('/libraries');
+        if (generation !== cacheGeneration()) return;
+        setLibraries(data.libraries);
+        await save(`${user.id}:libraries`, data.libraries);
+        setOffline(false);
+      } catch (e) {
+        if (generation !== cacheGeneration()) return;
+        if (!(e instanceof HttpError)) {
+          setLibraries((await cachedLibraries(user)) || []);
+          setOffline(true);
+        } else handleError(e);
+      }
+    },
+    [user, handleError],
+  );
   useEffect(() => {
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    const online = () => {
-      void refresh();
-    };
+    const online = () => setOffline(false);
     const off = () => setOffline(true);
     window.addEventListener('online', online);
     window.addEventListener('offline', off);
@@ -447,7 +478,17 @@ export default function App() {
       return;
     }
     try {
+      const local = await cached<Manifest>(manifestKey(user, route.id)).catch(() => undefined);
+      if (seq !== manifestSeq.current) return;
+      if (local) {
+        setManifest(local);
+        return;
+      }
       const data = await api<Manifest>(`/libraries/${route.id}/manifest`);
+      if (seq !== manifestSeq.current) return;
+      await save(manifestKey(user, route.id), data).catch(() =>
+        notify('本机存档未能保存，请检查存储空间'),
+      );
       if (seq !== manifestSeq.current) return;
       setManifest(data);
       setOffline(false);
@@ -466,6 +507,8 @@ export default function App() {
       } else handleError(e);
     }
   }, [user, route.id, handleError, notify]);
+  const latestLoadManifest = useRef(loadManifest);
+  latestLoadManifest.current = loadManifest;
   useEffect(() => {
     setManifest(undefined);
     setOfflineSaved(false);
@@ -646,7 +689,7 @@ export default function App() {
         `/import?kind=${route.kind}&name=${encodeURIComponent(name.trim() || zip.name.replace(/\.zip$/i, ''))}`,
         { method: 'POST', body: form },
       );
-      await refresh();
+      await refresh(true);
       setModal(null);
       setZip(null);
       setName('');
@@ -670,7 +713,7 @@ export default function App() {
           })
         ).library;
         setCreatedSyncLibrary(lib);
-        await refresh();
+        await refresh(true);
       }
       const data = await api<{ token: string }>(`/libraries/${lib.id}/token`, { method: 'POST' });
       setToken(JSON.stringify({ server: location.origin, libraryId: lib.id, token: data.token }));
@@ -700,7 +743,7 @@ export default function App() {
     const seq = ++searchSeq.current;
     setSearchBusy(true);
     try {
-      if (offline) {
+      if (offline || offlineSaved) {
         const matches: SearchResult[] = [];
         for (const file of manifest.files.filter((f) => f.isText)) {
           const body = await fileBlob(user, manifest.library.id, file, false)
@@ -737,7 +780,7 @@ export default function App() {
       await removeLibraryCache(user, manifest.library.id);
       setModal(null);
       setRouteTo(route.kind);
-      await refresh();
+      await refresh(true);
       notify('已删除服务端副本，电脑上的原文件不受影响');
     } catch (e) {
       handleError(e);
@@ -845,31 +888,55 @@ export default function App() {
               </span>
             )}
             <button
-              className={`icon-button ${isRefreshing ? 'is-spinning' : ''}`}
-              aria-label={isRefreshing ? '正在刷新' : '刷新'}
-              title={isRefreshing ? '正在刷新…' : '刷新内容'}
+              className={`icon-button sync-button ${isRefreshing ? 'is-spinning' : ''}`}
+              aria-label={isRefreshing ? '正在同步' : '同步'}
+              title={isRefreshing ? syncProgress : '同步云端更新和本机修改'}
               disabled={!!progress || isRefreshing}
               onClick={async () => {
-                if (isRefreshing || progress) return;
+                if (syncController.current || progress) return;
+                const controller = new AbortController();
+                syncController.current = controller;
                 setIsRefreshing(true);
                 try {
-                  await refresh();
-                  if (route.id) await loadManifest();
-                  try {
-                    window.dispatchEvent(new Event('codesip:annotations-refresh'));
-                  } catch {
-                    /* ignore */
-                  }
-                  notify('已刷新最新内容');
-                } catch {
-                  notify('刷新失败，请检查网络');
+                  const result = await synchronizeLibraryData(
+                    user,
+                    setSyncProgress,
+                    controller.signal,
+                    route.id,
+                  );
+                  if (controller.signal.aborted) return;
+                  setLibraries(result.libraries);
+                  setOffline(false);
+                  await latestLoadManifest.current();
+                  notify(
+                    result.pending
+                      ? `文件已同步，${result.pending} 项本机修改仍待处理，请在批注或编辑文档中查看`
+                      : result.localOnly
+                        ? `同步完成；${result.localOnly} 个云端已移除的项目保留在本机`
+                        : '同步完成，内容已保存到本机',
+                  );
+                } catch (error) {
+                  if (controller.signal.aborted) return;
+                  if (error instanceof HttpError && error.status === 401) handleError(error);
+                  else
+                    notify(
+                      `同步未完成，已有本机内容保留。${error instanceof Error ? error.message : '请联网后重试'}`,
+                    );
                 } finally {
+                  if (syncController.current === controller) syncController.current = null;
                   setIsRefreshing(false);
+                  setSyncProgress('');
                 }
               }}
             >
               <RefreshCw size={17} className={isRefreshing ? 'spin-icon' : ''} />
+              <span>{isRefreshing ? '同步中' : '同步'}</span>
             </button>
+            {isRefreshing && (
+              <span className="sync-progress" role="status">
+                {syncProgress}
+              </span>
+            )}
             <button
               className="icon-button user-profile-btn"
               aria-label="账号与退出"
@@ -1065,7 +1132,7 @@ export default function App() {
                           setBusy(true);
                           try {
                             await api('/demo', { method: 'POST' });
-                            await refresh();
+                            await refresh(true);
                             notify('已添加示例');
                           } catch (e) {
                             handleError(e);

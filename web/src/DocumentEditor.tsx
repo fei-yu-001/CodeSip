@@ -51,13 +51,13 @@ export function DocumentEditor({
       <p className="editor-help">保存为“我的编辑版”，电脑中的 Obsidian 原文不变。</p>
       <div className="document-editor-status" role="status">
         {document.busy
-          ? '正在保存到云端…'
+          ? '正在同步…'
           : document.storageError
             ? '草稿尚未保存到本机'
             : document.draft
-              ? '草稿已存本机 · 待保存到云端'
+              ? '编辑版已存本机 · 待同步'
               : document.copy
-                ? '编辑版已保存到云端'
+                ? '编辑版已同步'
                 : '支持 Markdown 编辑'}
       </div>
       {(document.error || document.storageError) && (
@@ -84,7 +84,7 @@ export function DocumentEditor({
               type="button"
               className="button primary"
               disabled={document.busy}
-              onClick={() => void document.save(document.conflict!.updatedAt)}
+              onClick={() => void document.sync(document.conflict!.updatedAt)}
             >
               保留我的编辑
             </button>
@@ -121,7 +121,7 @@ export function DocumentEditor({
           disabled={!document.draft || document.busy || !!document.conflict}
           onClick={async () => {
             if (await document.save()) {
-              notify('我的编辑版已保存到云端');
+              notify('我的编辑版已同步');
               close();
             }
           }}

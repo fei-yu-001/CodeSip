@@ -47,3 +47,7 @@ sudo python3 /opt/harmonyos/services/codesip/current/deploy/backup.py
 ## 初始访问
 
 首次设置密钥不在 Git 或文档里发布。部署后使用本机 `.local/first-login.md` 中的值，打开 CodeSip 网页自己设置账号密码。账号建立后首次设置接口关闭。
+
+## 2026-11-25 本地优先阅读
+
+Web `2553ed49d2de` 开始，启动和阅读优先使用本机存档，数据更新由顶部“同步”手动发起；`GET /api/libraries/:id/reader-state` 提供同库批注/编辑版快照。无数据库格式变更。应用外壳更新继续通过头像菜单“检查应用更新”与“重载更新”，不要清除应用数据。发布记录、离线/冲突测试和真机验证限制见 [本地优先与手动同步](local-first-sync-2026-11-25.md)。

@@ -517,7 +517,7 @@ fn dispatch(
         let id = segments[2];
         if segments
             .get(3)
-            .is_some_and(|s| *s == "annotations" || *s == "document-copy")
+            .is_some_and(|s| *s == "annotations" || *s == "document-copy" || *s == "reader-state")
             && (session_cookie(headers).is_none()
                 || headers.contains_key("authorization")
                 || identity.library_id.is_some())
@@ -536,6 +536,11 @@ fn dispatch(
             return Err(ApiError::new(404, "接口不存在"));
         }
         let value = match (verb, action) {
+            ("GET", "reader-state") => {
+                let mut output = Output::json(reader::snapshot(db, uid, id)?)?;
+                output.reading = true;
+                return Ok(output);
+            }
             ("GET", "manifest") => {
                 let mut output = Output::json(db::manifest(db, uid, id)?)?;
                 output.reading = true;

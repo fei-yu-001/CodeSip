@@ -104,7 +104,11 @@ test('real download progress can be deferred; reload preserves offline drafts an
   );
   await context.setOffline(false);
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.annotation-pill.status-pending')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
+  await page.getByRole('button', { name: '同步', exact: true }).click();
   await expect(page.locator('.annotation-pill.status-synced')).toBeVisible();
+  await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0);
   await page.locator('article.markdown').evaluate((el) => {
     el.scrollTop = 1400;
   });

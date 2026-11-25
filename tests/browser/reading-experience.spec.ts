@@ -1,5 +1,12 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
+async function syncNow(page: Page) {
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
+  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0, {
+    timeout: 30000,
+  });
+}
 const origin = 'http://127.0.0.1:4319';
 let cookies: Awaited<ReturnType<BrowserContext['cookies']>>;
 test.beforeAll(async ({ playwright }) => {
@@ -121,7 +128,7 @@ test('edited documents restore local drafts, save independent copies and leave s
   await page.getByRole('button', { name: '编辑文档', exact: true }).click();
   const input = page.getByRole('textbox', { name: '文档内容' });
   await input.fill('# 我的编辑版\n\n手机补充的理解。');
-  await expect(page.getByRole('status').filter({ hasText: '草稿已存本机' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: '编辑版已存本机' })).toBeVisible();
   expect(
     await page.evaluate(
       () => !window.dispatchEvent(new Event('codesip:before-update', { cancelable: true })),
@@ -136,6 +143,8 @@ test('edited documents restore local drafts, save independent copies and leave s
   await expect(input).toHaveValue('# 我的编辑版\n\n手机补充的理解。');
   await page.getByRole('button', { name: '保存编辑版', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '编辑文档', exact: true })).toHaveCount(0);
+  expect(await copy(page, lib.id)).toBeNull();
+  await syncNow(page);
   expect((await copy(page, lib.id)).content).toContain('手机补充的理解');
   expect(await (await page.request.get(`/api/libraries/${lib.id}/manifest`)).json()).toEqual(
     manifest,
@@ -171,12 +180,13 @@ test('offline document drafts survive reopening and retry after reconnect', asyn
   await page.getByRole('button', { name: '编辑文档', exact: true }).click();
   await page.getByRole('textbox', { name: '文档内容' }).fill('# 离线编辑草稿');
   await page.getByRole('button', { name: '保存编辑版', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('草稿保留在本机');
+  await expect(page.getByRole('dialog', { name: '编辑文档', exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await page.reload();
   await expect(page.locator('.markdown-content')).toContainText('离线编辑草稿');
   await context.setOffline(false);
-  await page.getByRole('button', { name: '编辑文档', exact: true }).click();
-  await page.getByRole('button', { name: '保存编辑版', exact: true }).click();
+  expect(await copy(page, lib.id)).toBeNull();
+  await syncNow(page);
   await expect.poll(async () => (await copy(page, lib.id))?.content).toBe('# 离线编辑草稿');
 });
 
@@ -198,13 +208,15 @@ test('conflicting document writes preserve both versions until explicitly resolv
   });
   expect(remote.ok()).toBeTruthy();
   await page.getByRole('button', { name: '保存编辑版', exact: true }).click();
+  await syncNow(page);
+  await page.getByRole('button', { name: '编辑文档', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('其他设备已修改');
   await expect(page.getByRole('textbox', { name: '文档内容' })).toHaveValue('# 本机正在写的版本');
   expect((await copy(page, lib.id)).content).toBe('# 其他设备的版本');
   await page.getByText('查看云端版本', { exact: true }).click();
   await expect(page.locator('.document-conflict pre')).toHaveText('# 其他设备的版本');
   await page.getByRole('button', { name: '保留我的编辑', exact: true }).click();
-  await expect(page.locator('.document-editor-status')).toContainText('编辑版已保存到云端');
+  await expect(page.locator('.document-editor-status')).toContainText('编辑版已同步');
   expect((await copy(page, lib.id)).content).toBe('# 本机正在写的版本');
   await page.getByRole('textbox', { name: '文档内容' }).fill('# 第二次本机修改');
   const latest = await copy(page, lib.id);
@@ -218,6 +230,8 @@ test('conflicting document writes preserve both versions until explicitly resolv
     },
   });
   await page.getByRole('button', { name: '保存编辑版', exact: true }).click();
+  await syncNow(page);
+  await page.getByRole('button', { name: '编辑文档', exact: true }).click();
   await page.getByRole('button', { name: '采用云端版本', exact: true }).click();
   await expect(page.getByRole('textbox', { name: '文档内容' })).toHaveValue('# 保留云端的版本');
 });
@@ -245,7 +259,7 @@ test('storage failure keeps the document editor open and expired sessions preser
   await expect(page.getByRole('textbox', { name: '文档内容' })).toHaveValue('# 空间不足不能丢失');
   await page.evaluate(() => (window as any).restoreDocumentStorage());
   await page.getByRole('textbox', { name: '文档内容' }).fill('# 登录过期后仍保留的文档草稿');
-  await expect(page.locator('.document-editor-status')).toContainText('草稿已存本机');
+  await expect(page.locator('.document-editor-status')).toContainText('编辑版已存本机');
   await page.getByRole('button', { name: '返回阅读', exact: true }).click();
   expect(
     await page.evaluate(() =>
@@ -254,6 +268,8 @@ test('storage failure keeps the document editor open and expired sessions preser
   ).toBe(true);
   await context.clearCookies();
   await page.reload();
+  await expect(page.locator('.markdown-content')).toBeVisible();
+  await syncNow(page);
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible();
   const drafts = () =>
     page.evaluate(() =>

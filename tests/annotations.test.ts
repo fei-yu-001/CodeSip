@@ -360,3 +360,54 @@ test('static hosting preserves localized API errors and hides internal failure d
   assert.deepEqual(failure.json(), { error: '服务暂时无法完成请求，请稍后重试' });
   assert.equal(failure.body.includes('internal-test-detail'), false);
 });
+
+test('reader-state snapshot scopes all document metadata to the signed-in library and excludes deleted annotations', async (t) => {
+  const f = await fixture();
+  t.after(() => f.app.close());
+  const added = await f.app.inject({
+    method: 'PUT',
+    url: f.url + '/kept',
+    headers: f.headers,
+    payload: draft,
+  });
+  assert.equal(added.statusCode, 200);
+  const removed = await f.app.inject({
+    method: 'PUT',
+    url: f.url + '/removed',
+    headers: f.headers,
+    payload: { ...draft, path: 'other.md' },
+  });
+  await f.app.inject({
+    method: 'DELETE',
+    url: f.url + '/removed',
+    headers: f.headers,
+    payload: { expectedUpdatedAt: removed.json().annotation.updatedAt },
+  });
+  const manifest = f.store.manifest(f.user.id, f.lib.id);
+  const copy = await f.app.inject({
+    method: 'PUT',
+    url: `/api/libraries/${f.lib.id}/document-copy`,
+    headers: f.headers,
+    payload: {
+      path: draft.path,
+      content: '# 我的修改',
+      baseHash: manifest.files.find((file) => file.path === draft.path)!.hash,
+      expectedUpdatedAt: null,
+    },
+  });
+  const url = `/api/libraries/${f.lib.id}/reader-state`;
+  const state = await f.app.inject({ url, headers: f.headers });
+  assert.equal(state.statusCode, 200);
+  assert.deepEqual(state.json(), {
+    annotations: [added.json().annotation],
+    copies: [copy.json().copy],
+  });
+  assert.match(String(state.headers['cache-control']), /no-store/);
+  const other = await f.store.createUser('snapshot-other', 'other-snapshot-password');
+  for (const [headers, status] of [
+    [{ origin }, 401],
+    [{ origin, cookie: `codesip_session=${f.store.session(other.id)}` }, 404],
+    [{ origin, authorization: `Bearer ${f.store.issueToken(f.user.id, f.lib.id)}` }, 403],
+  ] as const)
+    assert.equal((await f.app.inject({ url, headers })).statusCode, status);
+});

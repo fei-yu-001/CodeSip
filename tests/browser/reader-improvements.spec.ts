@@ -7,6 +7,13 @@ import {
 } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 
+async function syncNow(page: Page) {
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
+  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0, {
+    timeout: 30000,
+  });
+}
 const origin = 'http://127.0.0.1:4319';
 let cookies: Awaited<ReturnType<BrowserContext['cookies']>>;
 test.beforeAll(async ({ playwright }) => {
@@ -72,14 +79,16 @@ test('annotations persist offline, edit and delete, and save errors keep the dra
   await page.getByRole('button', { name: '添加笔记批注' }).click();
   await page.getByRole('textbox', { name: '批注内容' }).fill('刷新后仍然保留的批注');
   await page.getByRole('button', { name: '保存批注', exact: true }).click();
+  await expect(page.locator('.annotation-pill.status-pending')).toContainText('刷新后仍然保留');
+  await syncNow(page);
   await expect(page.locator('.annotation-pill.status-synced')).toContainText('刷新后仍然保留');
   await page.reload();
   await expect(page.locator('.annotation-pill')).toContainText('刷新后仍然保留');
   await page.locator('.annotation-pill').click();
   await page.getByRole('textbox', { name: '批注内容' }).fill('修改后的批注');
   await page.getByRole('button', { name: '保存批注', exact: true }).click();
+  await syncNow(page);
   await expect(page.locator('.annotation-pill.status-synced')).toContainText('修改后的批注');
-  await page.getByRole('button', { name: '保存离线', exact: true }).click();
   await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
@@ -89,10 +98,13 @@ test('annotations persist offline, edit and delete, and save errors keep the dra
   await page.locator('.annotation-pill').click();
   await page.getByRole('button', { name: '删除批注', exact: true }).click();
   await expect(page.locator('.annotation-pill.status-deleting')).toContainText('待删除');
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await page.reload();
   await expect(page.locator('.markdown-content')).toBeVisible();
   await expect(page.locator('.annotation-pill.status-deleting')).toContainText('修改后的批注');
   await context.setOffline(false);
+  await expect(page.locator('.annotation-pill.status-deleting')).toHaveCount(1);
+  await syncNow(page);
   await expect(page.locator('.annotation-pill')).toHaveCount(0);
   expect(
     (await (await page.request.get(`/api/libraries/${lib.id}/annotations?path=note.md`)).json())
@@ -147,6 +159,7 @@ test('same-name files isolate annotations and legacy records require explicit im
   expect(
     await page.evaluate(() => localStorage.getItem('codesip:annotations:shared.ts')),
   ).toContain('旧版记录');
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await open(page, a, 'shared.ts');
   await expect(page.locator('.annotation-pill')).toHaveCount(1);
   await expect(page.locator('.annotation-pill')).toContainText('只属于项目 A');
@@ -348,11 +361,11 @@ test('account dialog and refresh feedback replace window.confirm and provide act
     await response;
     await route.continue();
   });
-  await page.getByRole('button', { name: '刷新' }).click();
-  await expect(page.getByRole('button', { name: '正在刷新' })).toBeDisabled();
+  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await expect(page.getByRole('button', { name: '正在同步', exact: true })).toBeDisabled();
   await expect(page.locator('.spin-icon')).toBeVisible();
   release();
-  await expect(page.locator('.toast')).toContainText('已刷新最新内容');
+  await expect(page.locator('.toast')).toContainText('同步完成');
 });
 
 test('session expiry keeps user annotation drafts and active logout clears them with explicit warning', async ({
@@ -377,6 +390,8 @@ test('session expiry keeps user annotation drafts and active logout clears them 
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await context.clearCookies();
   await page.reload();
+  await expect(page.locator('.markdown-content')).toBeVisible();
+  await syncNow(page);
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible();
   const drafts = () =>
     page.evaluate(() =>
@@ -429,6 +444,7 @@ test('server annotations reach a new device, failed saves stay local and open-ed
       response.status() === 503,
   );
   await page.reload();
+  await syncNow(page);
   await rejectedRetry;
   await expect(page.locator('.annotation-pill.status-pending')).toContainText('服务失败也不能丢失');
   await page.locator('.annotation-pill').click();
@@ -447,6 +463,16 @@ test('server annotations reach a new device, failed saves stay local and open-ed
     await expect(otherPage.locator('.annotation-pill.status-synced')).toContainText(
       '服务失败也不能丢失',
     );
+    let releaseSnapshot!: () => void;
+    const snapshotGate = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    await page.route(`**/api/libraries/${lib.id}/reader-state`, async (route) => {
+      await snapshotGate;
+      await route.continue();
+    });
+    await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
+    await page.getByRole('button', { name: '同步', exact: true }).click();
     await page.locator('.annotation-pill').click();
     await page.getByRole('textbox', { name: '批注内容' }).fill('编辑器里尚未提交的本机草稿');
     const existing = (await list())[0];
@@ -461,12 +487,15 @@ test('server annotations reach a new device, failed saves stay local and open-ed
       },
     });
     expect(update.ok()).toBeTruthy();
-    await page.evaluate(() => window.dispatchEvent(new Event('codesip:annotations-refresh')));
+    releaseSnapshot();
+    await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0);
+    await page.unroute(`**/api/libraries/${lib.id}/reader-state`);
     await expect(page.locator('.annotation-pill')).toContainText('另一台设备的新版本');
     await expect(page.getByRole('textbox', { name: '批注内容' })).toHaveValue(
       '编辑器里尚未提交的本机草稿',
     );
     await page.getByRole('button', { name: '保存批注', exact: true }).click();
+    await syncNow(page);
     await expect(page.locator('.annotation-pill.status-conflict')).toContainText('本机草稿');
     expect((await list())[0].note).toBe('另一台设备的新版本');
     await page.reload();
@@ -483,6 +512,7 @@ test('server annotations reach a new device, failed saves stay local and open-ed
     await expect(page.locator('.annotation-pill.status-synced')).toContainText('本机草稿');
     expect((await list())[0].note).toBe('编辑器里尚未提交的本机草稿');
     await otherPage.reload();
+    await syncNow(otherPage);
     await expect(otherPage.locator('.annotation-pill.status-synced')).toContainText('本机草稿');
     expect(await list()).toHaveLength(1);
   } finally {

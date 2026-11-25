@@ -1,6 +1,11 @@
 import { api, HttpError } from './api';
 import type { ReaderAnnotation } from '../../shared/types';
-import type { ReaderIdentity } from './readerState';
+import {
+  readerKey,
+  readerIdentities,
+  wasReaderLoaded,
+  type ReaderIdentity,
+} from './readerIdentity';
 
 export type AnnotationSyncStatus = 'synced' | 'pending' | 'conflict' | 'deleting';
 export interface Annotation {
@@ -151,6 +156,9 @@ class AnnotationStore {
   }
   private async readRemote() {
     const records = await this.remote();
+    this.mergeRemote(records);
+  }
+  mergeRemote(records: ReaderAnnotation[]) {
     if (this.disposed) return;
     const remote = new Map(records.map((item) => [item.id, item]));
     const merged: Annotation[] = [];
@@ -177,7 +185,9 @@ class AnnotationStore {
       }
     }
     for (const item of remote.values()) merged.push(fromRemote(item));
-    this.commit(merged, '服务器已读取，但本机缓存未能更新');
+    if (!this.commit(merged, '服务器已读取，但本机缓存未能更新'))
+      throw new Error('批注未能存入本机');
+    localStorage.setItem(readerKey('annotations-loaded', this.identity), '1');
   }
   persist = (
     items: Annotation[],
@@ -209,14 +219,21 @@ class AnnotationStore {
     this.notify(
       action.type === 'delete' ? '删除请求已保留，等待同步' : '批注已保存到本机，等待同步',
     );
-    this.sync();
     return true;
   };
-  sync = () => {
-    void this.enqueue(() => this.flush(), undefined);
+  sync = () => this.enqueue(() => this.flush(), undefined);
+  loadOnce = () => {
+    if (wasReaderLoaded('annotations', this.identity)) return Promise.resolve();
+    return this.enqueue(async () => {
+      try {
+        await this.readRemote();
+      } catch {
+        /* First read can be retried by explicit sync. */
+      }
+    }, undefined);
   };
   reload = () => {
-    void this.enqueue(async () => {
+    return this.enqueue(async () => {
       try {
         await this.readRemote();
       } catch {
@@ -380,3 +397,38 @@ window.addEventListener('codesip:private-data-cleared', () => {
   stores.forEach((store) => store.dispose());
   stores.clear();
 });
+
+export async function syncLibraryAnnotations(userId: string, libraryId: string) {
+  for (const identity of readerIdentities('annotations', userId, libraryId)) {
+    const store = annotationStore(readerKey('annotations', identity), identity, () => {});
+    await store.sync();
+  }
+}
+export function mergeLibraryAnnotations(
+  userId: string,
+  libraryId: string,
+  records: ReaderAnnotation[],
+) {
+  const paths = new Set([
+    ...readerIdentities('annotations', userId, libraryId).map((i) => i.path),
+    ...records.map((r) => r.path),
+  ]);
+  for (const path of paths) {
+    const identity = { userId, libraryId, path };
+    annotationStore(readerKey('annotations', identity), identity, () => {}).mergeRemote(
+      records.filter((r) => r.path === path),
+    );
+  }
+}
+export function annotationPendingCount(userId: string) {
+  let pending = 0;
+  for (const identity of readerIdentities('annotations', userId)) {
+    const state = annotationStore(
+      readerKey('annotations', identity),
+      identity,
+      () => {},
+    ).getSnapshot();
+    pending += state.error ? 1 : state.annotations.filter((a) => a.syncStatus !== 'synced').length;
+  }
+  return pending;
+}

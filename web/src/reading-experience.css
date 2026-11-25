@@ -372,3 +372,27 @@
     height: calc(27px + env(safe-area-inset-bottom));
   }
 }
+
+.sync-progress {
+  position: absolute;
+  right: 12px;
+  top: 100%;
+  z-index: 70;
+  max-width: calc(100vw - 24px);
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.top-actions .sync-button {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  padding: 0 9px;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+}

@@ -124,12 +124,14 @@ test('client serializes delayed reads and writes while retaining newer edits and
   await until(() => readStarted);
   const first = f.make('first', '初稿');
   assert.ok(store.persist([first], { type: 'save', item: first }));
+  store.sync();
   read.release();
   await until(() => writeStarted);
   const secondEdit = { ...store.getSnapshot().annotations[0], note: '请求期间的新修改' };
   const other = f.make('other', '另一条批注');
   store.persist([secondEdit], { type: 'save', item: secondEdit });
   store.persist([other], { type: 'save', item: other });
+  store.sync();
   write.release();
   await until(
     () =>
@@ -161,6 +163,7 @@ test('client recovers lost acknowledgements, retains offline drafts after reopen
   };
   const initial = f.make('recover', '响应丢失但服务端已提交');
   store.persist([initial], { type: 'save', item: initial });
+  store.sync();
   await until(() => !!store.getSnapshot().annotations[0]?.lastError);
   assert.equal(f.list().length, 1);
   reset();
@@ -211,6 +214,7 @@ test('client retains an offline deletion across reopening and retries a failed d
   let store = f.create();
   const initial = f.make('delete-me', '待删除的合成批注');
   store.persist([initial], { type: 'save', item: initial });
+  store.sync();
   await until(() => store.getSnapshot().annotations[0]?.syncStatus === 'synced');
   online = false;
   store.persist([], { type: 'delete', item: store.getSnapshot().annotations[0] });
@@ -253,6 +257,7 @@ test('client clearing private data invalidates late responses and does not recre
   };
   const item = f.make('late', '退出之前已发出的批注');
   store.persist([item], { type: 'save', item });
+  store.sync();
   await until(() => started);
   reset();
   memory.clear();
@@ -269,6 +274,7 @@ test('client preserves the editor base version when a background refresh discove
   const store = f.create();
   const item = f.make('editor', '打开编辑器时的版本');
   store.persist([], { type: 'save', item });
+  store.sync();
   await until(() => store.getSnapshot().annotations[0]?.syncStatus === 'synced');
   const editor = { ...store.getSnapshot().annotations[0] };
   f.store.annotations.put(f.user.id, f.library.id, editor.id, {
@@ -281,7 +287,29 @@ test('client preserves the editor base version when a background refresh discove
   store.reload();
   await until(() => store.getSnapshot().annotations[0]?.note === '编辑器打开期间其他设备的更新');
   store.persist([], { type: 'save', item: { ...editor, note: '编辑器里尚未提交的草稿' } });
+  store.sync();
   await until(() => store.getSnapshot().annotations[0]?.syncStatus === 'conflict');
   assert.equal(f.list()[0].note, '编辑器打开期间其他设备的更新');
   assert.equal(store.getSnapshot().annotations[0].note, '编辑器里尚未提交的草稿');
+});
+
+test('saving and reopening annotations stays local until the user requests sync', async (t) => {
+  const f = await fixture(t);
+  let store = f.create();
+  const item = f.make('local-only', '只在本机保存');
+  let requests = 0;
+  globalThis.fetch = async (input, init) => {
+    requests++;
+    return f.fetchApi(input, init);
+  };
+  store.persist([], { type: 'save', item });
+  await delay(20);
+  assert.equal(requests, 0);
+  reset();
+  store = f.create();
+  await store.loadOnce();
+  assert.equal(requests, 0);
+  assert.equal(store.getSnapshot().annotations[0].note, item.note);
+  await store.sync();
+  assert.equal(f.list()[0].note, item.note);
 });

@@ -37,6 +37,22 @@ pub fn annotations(db: &Connection, uid: &str, lib: &str, path: &str) -> Result<
         .collect::<rusqlite::Result<_>>()?;
     Ok(json!({"annotations":list}))
 }
+// One consistent, account-scoped snapshot avoids two requests per document at sync time.
+pub fn snapshot(db: &Connection, uid: &str, lib: &str) -> Result<Value> {
+    let tx = db.unchecked_transaction()?;
+    db::library(&tx, uid, lib)?;
+    let annotations: Vec<Value> = tx
+        .prepare(&format!(
+            "{ANN_SELECT} WHERE library_id=? AND deleted=0 ORDER BY path,line,created_at,id"
+        ))?
+        .query_map([lib], annotation_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    let copies: Vec<Value> = tx.prepare(
+        "SELECT path,content,base_hash,updated_at FROM reader_document_copies WHERE library_id=? ORDER BY path"
+    )?.query_map([lib], |r| Ok(json!({"path":r.get::<_,String>(0)?,"content":r.get::<_,String>(1)?,"baseHash":r.get::<_,String>(2)?,"updatedAt":r.get::<_,i64>(3)?})))?.collect::<rusqlite::Result<_>>()?;
+    tx.commit()?;
+    Ok(json!({"annotations":annotations,"copies":copies}))
+}
 pub fn put_annotation(
     db: &Connection,
     uid: &str,
