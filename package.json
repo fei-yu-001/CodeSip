@@ -9,16 +9,21 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:server": "tsx watch server/main.ts",
+    "dev:server": "node scripts/start-server.mjs --build",
     "dev:web": "vite --host 127.0.0.1",
     "check": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "playwright test",
     "build": "node scripts/build.mjs",
-    "start": "node dist/server/main.mjs",
+    "start": "node scripts/start-server.mjs",
     "plugin:build": "node scripts/build-plugin.mjs",
     "release": "node scripts/release.mjs",
-    "format": "prettier --write \"server/**/*.ts\" \"shared/**/*.ts\" \"web/**/*.{ts,tsx,css,js,html,json,webmanifest}\" \"plugin/**/*.{ts,json,css}\" \"scripts/*.mjs\" \"tests/**/*.ts\" \"*.ts\" \"*.json\""
+    "format": "prettier --write \"server/**/*.ts\" \"shared/**/*.ts\" \"web/**/*.{ts,tsx,css,js,html,json,webmanifest}\" \"plugin/**/*.{ts,json,css}\" \"scripts/*.mjs\" \"tests/**/*.ts\" \"*.ts\" \"*.json\"",
+    "build:server": "node scripts/build-rust.mjs",
+    "check:rust": "node scripts/cargo.mjs clippy --locked --all-targets -- -D warnings",
+    "test:rust": "node scripts/cargo.mjs test --locked",
+    "pretest": "node scripts/build-rust.mjs",
+    "build:linux": "node scripts/build-linux.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "6.2.5",

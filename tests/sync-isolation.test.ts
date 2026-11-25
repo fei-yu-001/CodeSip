@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { buildApp } from '../server/app';
+import { buildApp } from './helpers/backend';
 import { Store, digest } from '../server/store';
 import { SyncServerStore } from '../server/syncServer';
 

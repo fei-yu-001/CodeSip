@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import { buildApp } from '../server/app';
+import { buildApp } from './helpers/backend';
 import type { Annotation } from '../web/src/annotationSync';
 
 const memory = new Map<string, string>();

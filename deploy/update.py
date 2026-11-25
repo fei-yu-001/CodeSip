@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Update an existing CodeSip release only; no nginx or other service changes."""
-import hashlib, json, os, pathlib, sqlite3, subprocess, tarfile, time, urllib.request
+import hashlib, json, os, pathlib, sqlite3, subprocess, tarfile, time, urllib.request, shutil, tempfile, pwd
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path('/opt/harmonyos/services/codesip')
@@ -51,12 +51,12 @@ def main():
             if item.parts[0] not in ('dist', 'deploy', 'package.json', 'package-lock.json', 'LICENSE'):
                 raise RuntimeError('Unexpected release content')
         package.extractall(release, filter='data')
-    if (previous / 'package-lock.json').read_bytes() == (release / 'package-lock.json').read_bytes() and (previous / 'node_modules').is_dir():
-        (release / 'node_modules').symlink_to(previous / 'node_modules', target_is_directory=True)
-    else:
-        run(['chown', '-R', 'codesip:codesip', str(release)])
-        run(['runuser', '-u', 'codesip', '--', 'env', 'npm_config_cache=/tmp/codesip-npm-cache', 'npm', 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], cwd=release)
-        run(['chown', '-R', 'root:root', str(release)])
+    binary = release / 'dist/server/codesip-server'
+    if binary.read_bytes()[:6] != b'\x7fELF\x02\x01':
+        raise RuntimeError('Expected a Linux x86_64 Rust service')
+    binary.chmod(0o755)
+    unit = pathlib.Path('/etc/systemd/system/codesip.service')
+    previous_unit = unit.read_bytes()
     backup_dir = pathlib.Path('/var/backups/codesip')
     backup_dir.mkdir(mode=0o700, exist_ok=True)
     backup_dir.chmod(0o700)
@@ -67,14 +67,29 @@ def main():
         if dst.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
             raise RuntimeError('Backup verification failed')
     backup.chmod(0o600)
+    # Exercise the native executable against an online backup before switching.
+    # Validation mutates only this private copy; no credentials enter arguments.
+    owner = pwd.getpwnam('codesip')
+    with tempfile.TemporaryDirectory(prefix='validation-', dir=DATABASE.parent) as temporary:
+        work = pathlib.Path(temporary)
+        os.chown(work, owner.pw_uid, owner.pw_gid)
+        fixture = work / 'candidate.sqlite'
+        shutil.copyfile(backup, fixture)
+        fixture.chmod(0o600)
+        os.chown(fixture, owner.pw_uid, owner.pw_gid)
+        checked = json.loads(run(['runuser', '-u', 'codesip', '--', str(binary), '--check-database', str(fixture)]))
+        if checked.get('runtime') != 'rust' or checked.get('status') != 'ok':
+            raise RuntimeError('Native database validation failed')
     pending = ROOT / ('current-' + release_id)
     pending.symlink_to(release)
     pending.replace(current)
     try:
+        shutil.copyfile(release / 'deploy/codesip.service', unit)
+        run(['systemctl', 'daemon-reload'])
         run(['systemctl', 'restart', 'codesip'])
         for attempt in range(20):
             try:
-                if health('http://127.0.0.1:4318/api/health').get('app') != 'codesip':
+                if health('http://127.0.0.1:4318/api/health').get('runtime') != 'rust':
                     raise RuntimeError('Unexpected service')
                 break
             except Exception:
@@ -95,9 +110,13 @@ def main():
         rollback = ROOT / ('rollback-' + release_id)
         rollback.symlink_to(previous)
         rollback.replace(current)
+        unit.write_bytes(previous_unit)
+        run(['systemctl', 'daemon-reload'])
         run(['systemctl', 'restart', 'codesip'])
+        health('https://codesip.ddyu.online/api/health')
+        health('https://jade.ddyu.online/api/health')
         raise
-    result = {'release': release_id, 'previous': previous.name, 'sha256': args.sha256, 'backup': backup.name, 'codesip_health': 200, 'game_health_before_and_after': 200, 'nginx_changed': False}
+    result = {'release': release_id, 'previous': previous.name, 'sha256': args.sha256, 'backup': backup.name, 'codesip_health': 200, 'game_health_before_and_after': 200, 'nginx_changed': False, 'runtime': 'rust', 'native_database_validation': 'ok', 'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest()}
     (release / 'verification.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
     print(json.dumps(result))
 

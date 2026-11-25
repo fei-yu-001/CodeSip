@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { buildApp } from '../server/app';
+import { buildApp } from './helpers/backend';
 import { readArchive } from '../server/zip';
 import { zipSync, strToU8 } from 'fflate';
 import { MAX_ANNOTATIONS_PER_FILE } from '../server/annotations';
@@ -353,9 +353,8 @@ test('static hosting preserves localized API errors and hides internal failure d
   const invalid = await app.inject({ url: url + '?path=../invalid', headers });
   assert.equal(invalid.statusCode, 400);
   assert.deepEqual(invalid.json(), { error: '文件路径无效' });
-  store.annotations.list = () => {
-    throw new Error('internal-test-detail-must-not-leak');
-  };
+  // Break only this disposable fixture to exercise the real database error path.
+  store.db.exec('ALTER TABLE reader_annotations RENAME TO internal_test_detail_must_not_leak');
   const failure = await app.inject({ url: url + '?path=other.md', headers });
   assert.equal(failure.statusCode, 500);
   assert.deepEqual(failure.json(), { error: '服务暂时无法完成请求，请稍后重试' });

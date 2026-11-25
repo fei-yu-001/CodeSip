@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { buildApp } from '../server/app';
+import { buildApp } from './helpers/backend';
 import { LocalIndexer } from '../server/indexer';
 import { SyncEngine, type SyncTransport } from '../shared/syncEngine';
 import { digest } from '../server/store';

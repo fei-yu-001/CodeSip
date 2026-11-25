@@ -1,13 +1,19 @@
 from pathlib import Path
-import tarfile,json,hashlib,secrets
+import tarfile,json,hashlib,secrets,os
 root=Path(__file__).resolve().parent.parent
 out=root/'.local';out.mkdir(exist_ok=True)
 archive=out/'codesip-release.tar.gz'
+binary=Path(os.environ.get('CODESIP_LINUX_BINARY',str(root/'server-rust/target/x86_64-unknown-linux-musl/release/codesip-server')))
+header=binary.read_bytes()[:20]
+if header[:6]!=b'\x7fELF\x02\x01' or header[18:20]!=b'\x3e\x00':
+    raise RuntimeError('A verified Linux x86_64 Rust binary is required for release')
 with tarfile.open(archive,'w:gz') as tar:
     for name in ['package.json','package-lock.json','LICENSE','deploy']:
         tar.add(root/name,arcname=name)
-    for name in ['web','server']:
-        tar.add(root/'dist'/name,arcname='dist/'+name)
+    tar.add(root/'dist/web',arcname='dist/web')
+    info=tar.gettarinfo(str(binary),arcname='dist/server/codesip-server')
+    info.mode=0o755
+    with binary.open('rb') as content: tar.addfile(info,content)
 config=out/'codesip.env'
 if not config.exists():
     key=secrets.token_urlsafe(32)

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gunzipSync } from 'node:zlib';
-import { buildApp } from '../server/app';
+import { gunzipSync, gzipSync, constants } from 'node:zlib';
+import { buildApp } from './helpers/backend';
 import { digest } from '../server/store';
 
 test('reading transport compresses large text and manifests without changing source hashes, authorization or private caching', async (t) => {
@@ -93,4 +93,34 @@ test('reading transport compresses large text and manifests without changing sou
   });
   assert.equal(token.statusCode, 200);
   assert.equal(token.headers['content-encoding'], undefined);
+});
+
+test('Rust gzip retains the mobile transfer size of the previous zlib transport', async (t) => {
+  const { app, store } = await buildApp({
+    database: ':memory:',
+    setupToken: 'gzip-parity-synthetic-test',
+    rateLimit: false,
+  });
+  t.after(() => app.close());
+  const user = await store.createUser('compression', 'synthetic-compression-password');
+  const library = store.createLibrary(user.id, 'Synthetic compression', 'notes');
+  const content = Buffer.from(
+    Array.from(
+      { length: 7000 },
+      (_, i) => `## Synthetic section ${i}\n\nRead-only example ${digest(String(i))}\n\n`,
+    ).join(''),
+  ).subarray(0, 641620);
+  store.put(library.id, [{ path: 'long.md', bytes: content }], [], 0);
+  const response = await app.inject({
+    url: `/api/libraries/${library.id}/file?path=long.md`,
+    headers: { cookie: `codesip_session=${store.session(user.id)}`, 'accept-encoding': 'gzip' },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['content-encoding'], 'gzip');
+  assert.deepEqual(gunzipSync(response.rawPayload), content);
+  const baseline = gzipSync(content, { level: constants.Z_BEST_SPEED });
+  assert.ok(
+    response.rawPayload.length <= baseline.length * 1.05,
+    `compressed bytes ${response.rawPayload.length} exceed previous transport ${baseline.length}`,
+  );
 });

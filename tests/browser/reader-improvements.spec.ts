@@ -124,6 +124,9 @@ test('same-name files isolate annotations and legacy records require explicit im
   await page.getByRole('textbox', { name: '批注内容' }).fill('只属于项目 A');
   await page.getByRole('button', { name: '保存批注', exact: true }).click();
   await expect(page.locator('.annotation-pill')).toContainText('只属于项目 A');
+  // Closing a sheet finishes an asynchronous same-URL history traversal.
+  // Wait for that transition before issuing an external browser navigation.
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await open(page, b, 'shared.ts');
   await expect(page.locator('.annotation-pill')).toHaveCount(0);
   await page.evaluate(() =>
@@ -371,6 +374,7 @@ test('session expiry keeps user annotation drafts and active logout clears them 
       .annotations,
   ).toEqual([]);
 
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await context.clearCookies();
   await page.reload();
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible();

@@ -9,7 +9,7 @@ Group=codesip
 WorkingDirectory=/opt/harmonyos/services/codesip/current
 Environment=NODE_ENV=production
 EnvironmentFile=/etc/codesip/codesip.env
-ExecStart=/usr/local/bin/node dist/server/main.mjs
+ExecStart=/opt/harmonyos/services/codesip/current/dist/server/codesip-server
 Restart=on-failure
 RestartSec=5
 StateDirectory=codesip

@@ -1,18 +1,12 @@
-import { build as bundle } from 'esbuild';
+import { buildRust, binaryName, binaryPath } from './rust.mjs';
 import { build as buildWeb } from 'vite';
 import { readFile, writeFile, readdir, mkdir, copyFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+buildRust();
+await mkdir('dist/server', { recursive: true });
+await copyFile(binaryPath, `dist/server/${binaryName}`);
 await buildWeb();
-await bundle({
-  entryPoints: ['server/main.ts'],
-  outfile: 'dist/server/main.mjs',
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  target: 'node24',
-  packages: 'external',
-});
 const walk = async (dir) =>
   (
     await Promise.all(
@@ -57,29 +51,4 @@ const entries = {};
 for (const file of await walk('dist/obsidian/codesip-sync'))
   entries['codesip-sync/' + path.basename(file)] = new Uint8Array(await readFile(file));
 await writeFile('dist/web/codesip-obsidian.zip', zipSync(entries));
-const pkg = JSON.parse(await readFile('package.json', 'utf8'));
-const runtimeNames = [
-  'fastify',
-  '@fastify/cookie',
-  '@fastify/rate-limit',
-  '@fastify/multipart',
-  '@fastify/static',
-  'yauzl',
-];
-await mkdir('dist/release', { recursive: true });
-await writeFile(
-  'dist/release/package.json',
-  JSON.stringify(
-    {
-      name: 'codesip-service',
-      version: pkg.version,
-      private: true,
-      type: 'module',
-      engines: { node: '>=24' },
-      dependencies: Object.fromEntries(runtimeNames.map((n) => [n, pkg.dependencies[n]])),
-    },
-    null,
-    2,
-  ),
-);
-console.log('Built web reader, API and Obsidian plugin.');
+console.log('Built web reader, Rust API and Obsidian plugin.');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildApp } from '../server/app';
+import { buildApp } from './helpers/backend';
 import { digest } from '../server/store';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';

@@ -26,3 +26,5 @@ harmony/**/oh_modules/
 harmony/**/build/
 harmony/local.properties
 harmony/.sign/
+
+server-rust/target/

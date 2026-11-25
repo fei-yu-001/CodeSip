@@ -2,7 +2,7 @@
 
 把代码和学习笔记装进口袋。电脑整理，手机慢慢读。
 
-CodeSip 是一个自托管的只读阅读器，包含手机与桌面适配的 Web/PWA 客户端、独立 Node.js 后台、Obsidian 桌面同步插件，以及 HarmonyOS ArkWeb 应用工程。此项目与 Eternal Jade Scroll 游戏的服务、数据库、账号及发布目录完全独立。
+CodeSip 是一个自托管的只读阅读器，包含手机与桌面适配的 Web/PWA 客户端、独立 Rust 后台、Obsidian 桌面同步插件，以及 HarmonyOS ArkWeb 应用工程。此项目与 Eternal Jade Scroll 游戏的服务、数据库、账号及发布目录完全独立。
 
 ## 当前可用
 
@@ -20,7 +20,7 @@ CodeSip 是一个自托管的只读阅读器，包含手机与桌面适配的 We
 
 ## 快速运行
 
-需要 Node.js 24+ 与 npm。
+开发构建需要 Rust 1.100+、Node.js 24+ 与 npm；Windows 需要 Visual C++ 构建工具。生产 API 直接运行 Rust 可执行文件，无须 Node.js。
 
 ```powershell
 npm ci
@@ -31,6 +31,8 @@ npm run dev
 
 ```powershell
 npm run check
+npm run check:rust
+npm run test:rust
 npm test
 npm run build
 npx playwright install chromium
@@ -42,12 +44,12 @@ npm run test:e2e
 | 产物 | 位置 |
 | --- | --- |
 | Web/PWA 阅读器 | `dist/web/` |
-| 后台 | `dist/server/main.mjs` |
+| Rust 后台 | `dist/server/codesip-server`（Windows 为 `.exe`） |
 | Obsidian 插件 | `dist/obsidian/codesip-sync/` |
 | 插件 ZIP | `dist/web/codesip-obsidian.zip` |
 | 鸿蒙工程 | `harmony/` |
 
-生产运行：配置下方环境变量，再执行 `npm start`。源码不会被执行，HTML 也以文本处理。
+本地运行：构建后配置下方环境变量，再执行 `npm start`。生产运行由 systemd 直接启动原生程序。源码不会被执行，HTML 也以文本处理。
 
 ## 自托管配置
 
@@ -68,7 +70,7 @@ npm run test:e2e
 - nginx：仅 `sites-available/codesip` 和相应链接
 - 备份：`/var/backups/codesip`
 
-构建后执行 `npm run release` 生成 `.local/codesip-release.tar.gz`。首次设置资料也仅保存到忽略目录 `.local/`；生产数据和密钥不进入仓库。部署详见 [部署说明](docs/deployment.md)。
+Linux 发布还需执行 `npm run build:linux`（Rust musl target、Zig 与 cargo-zigbuild），然后执行 `npm run release` 生成 `.local/codesip-release.tar.gz`。首次设置资料也仅保存到忽略目录 `.local/`；生产数据和密钥不进入仓库。部署详见 [部署说明](docs/deployment.md)。
 
 ## 设置 Obsidian 云端同步
 
@@ -95,12 +97,13 @@ npm run test:e2e
 
 ## 验证记录
 
-实际构建、测试、部署结果及尚未完成的验证见 [验收记录](docs/verification.md)。液态玻璃的设计与兼容策略见 [设计说明](docs/liquid-glass.md)。
+Rust 后端架构、性能对比和迁移结果见 [Rust 重构记录](docs/rust-backend-2026-11-25.md)。实际构建、测试、部署结果及尚未完成的验证见 [验收记录](docs/verification.md)。液态玻璃的设计与兼容策略见 [设计说明](docs/liquid-glass.md)。
 
 ## 目录
 
 ```text
-server/      后台、存储、ZIP 导入
+server-rust/ Rust API、SQLite、ZIP 导入
+server/      旧版 API 测试基准和本地同步组件
 shared/      前后端数据类型
 web/         React 阅读器、离线缓存、玻璃材质
 plugin/      Obsidian 桌面同步插件

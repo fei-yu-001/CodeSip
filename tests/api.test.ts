@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildApp } from '../server/app';
+import { buildApp } from './helpers/backend';
 import { readArchive } from '../server/zip';
 import { cleanPath, MAX_FILE } from '../server/paths';
 import { zipSync, strToU8 } from 'fflate';
