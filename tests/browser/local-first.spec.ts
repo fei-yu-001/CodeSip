@@ -53,6 +53,10 @@ test('cached startup and navigation issue no data requests; edits in a closed do
   context,
 }) => {
   const library = await fixture(page);
+  await page.goto(`/#notes/${library.id}?file=b.md`);
+  await expect(page.getByRole('heading', { name: '本机 B', exact: true })).toBeVisible();
+  await page.goto(`/#notes/${library.id}?file=a.md`);
+  await expect(page.getByRole('heading', { name: '本机 A', exact: true })).toBeVisible();
   await sync(page);
   await expect(page.locator('.toast')).toContainText('同步完成');
   await page.getByRole('button', { name: '添加笔记批注' }).click();
@@ -101,6 +105,8 @@ test('interrupted sync retains the saved revision and resumes without overwritin
   page,
 }) => {
   const library = await fixture(page);
+  await page.getByRole('button', { name: '保存离线', exact: true }).click();
+  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
   await sync(page);
   const patch = await page.request.post(`/api/libraries/${library.id}/sync`, {
     headers: { origin },
@@ -132,6 +138,15 @@ test('interrupted sync retains the saved revision and resumes without overwritin
 
 test('storage quota failure never claims a complete local archive', async ({ page }) => {
   const library = await fixture(page);
+  const patch = await page.request.post(`/api/libraries/${library.id}/sync`, {
+    headers: { origin },
+    data: {
+      baseRevision: library.revision,
+      deleted: [],
+      upserts: [{ path: 'a.md', content: Buffer.from('# 尚未保存的新版 A').toString('base64') }],
+    },
+  });
+  expect(patch.ok()).toBeTruthy();
   await page.evaluate(() => {
     const original = IDBObjectStore.prototype.put;
     IDBObjectStore.prototype.put = function (value, key) {
@@ -145,4 +160,79 @@ test('storage quota failure never claims a complete local archive', async ({ pag
   await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '本机 A', exact: true })).toBeVisible();
   expect(library.id).toBeTruthy();
+});
+
+test('explicit reads and sync work when the WebView reports offline but requests succeed', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'onLine', { configurable: true, get: () => false });
+  });
+  const library = await fixture(page);
+  expect(await page.evaluate(() => navigator.onLine)).toBe(false);
+  await page.getByRole('button', { name: '添加笔记批注' }).click();
+  await page.getByRole('textbox', { name: '批注内容' }).fill('联网提示不准确时仍可同步');
+  await page.getByRole('button', { name: '保存批注', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
+  await page.goto(`/#notes/${library.id}?file=b.md`);
+  await expect(page.getByRole('heading', { name: '本机 B', exact: true })).toBeVisible();
+  const annotations = async () =>
+    (await (await page.request.get(`/api/libraries/${library.id}/annotations?path=a.md`)).json())
+      .annotations;
+  expect(await annotations()).toEqual([]);
+  await sync(page);
+  await expect(page.locator('.toast')).toContainText('同步完成');
+  expect((await annotations())[0].note).toBe('联网提示不准确时仍可同步');
+  expect(await page.evaluate(() => navigator.onLine)).toBe(false);
+});
+
+test('sync updates saved files without downloading unread files and keeps full archives complete', async ({
+  page,
+  context,
+}) => {
+  const library = await fixture(page);
+  const patch = await page.request.post(`/api/libraries/${library.id}/sync`, {
+    headers: { origin },
+    data: {
+      baseRevision: library.revision,
+      deleted: [],
+      upserts: [
+        { path: 'a.md', content: Buffer.from('# 已读内容更新').toString('base64') },
+        { path: 'c.md', content: Buffer.from('# 新增未读内容').toString('base64') },
+      ],
+    },
+  });
+  expect(patch.ok()).toBeTruthy();
+  const fetched: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === `/api/libraries/${library.id}/file`)
+      fetched.push(url.searchParams.get('path')!);
+  });
+  await sync(page);
+  await expect(page.locator('.toast')).toContainText('同步完成');
+  await expect(page.getByRole('heading', { name: '已读内容更新', exact: true })).toBeVisible();
+  expect(fetched).toEqual(['a.md']);
+  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '保存离线', exact: true }).click();
+  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  const revision = (await (await page.request.get(`/api/libraries/${library.id}/manifest`)).json())
+    .library.revision;
+  const add = await page.request.post(`/api/libraries/${library.id}/sync`, {
+    headers: { origin },
+    data: {
+      baseRevision: revision,
+      deleted: [],
+      upserts: [{ path: 'd.md', content: Buffer.from('# 完整离线的新文件').toString('base64') }],
+    },
+  });
+  expect(add.ok()).toBeTruthy();
+  fetched.length = 0;
+  await sync(page);
+  await expect(page.locator('.toast')).toContainText('同步完成');
+  expect(fetched).toEqual(['d.md']);
+  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await context.setOffline(true);
+  await page.goto(`/#notes/${library.id}?file=d.md`);
+  await expect(page.getByRole('heading', { name: '完整离线的新文件', exact: true })).toBeVisible();
 });

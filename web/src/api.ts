@@ -145,8 +145,30 @@ export async function downloadLibrary(
   manifest: Manifest,
   progress: (done: number, total: number) => void,
   signal?: AbortSignal,
+  scope: 'all' | 'saved' = 'all',
 ) {
   const generation = privateGeneration;
+  let files = manifest.files;
+  if (scope === 'saved') {
+    const [previous, offline] = await Promise.all([
+      cached<Manifest>(manifestKey(user, manifest.library.id)),
+      cached<{ revision: number }>(`${user.id}:offline:${manifest.library.id}`),
+    ]);
+    // A deliberately saved full archive stays complete across revisions.
+    // Ordinary sync updates only files already read or saved on this device.
+    if (!previous || offline?.revision !== previous.library.revision) {
+      const prefix = `${user.id}:blob:${manifest.library.id}:`;
+      const keys = await access<IDBValidKey[]>('readonly', (store) =>
+        store.getAllKeys(IDBKeyRange.bound(prefix, prefix + '\uffff')),
+      );
+      const hashes = new Set(keys.map((key) => String(key).slice(prefix.length)));
+      const oldHashes = new Map(previous?.files.map((file) => [file.path, file.hash]));
+      files = manifest.files.filter(
+        (file) => hashes.has(file.hash) || hashes.has(oldHashes.get(file.path) || ''),
+      );
+    }
+  }
+  if (signal?.aborted || generation !== privateGeneration) throw abortError(signal);
   const controller = new AbortController();
   const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   let cursor = 0,
@@ -154,14 +176,14 @@ export async function downloadLibrary(
   const results = await Promise.allSettled(
     Array.from({ length: 2 }, async () => {
       try {
-        while (cursor < manifest.files.length) {
+        while (cursor < files.length) {
           if (combined.aborted || generation !== privateGeneration) throw abortError(combined);
-          const file = manifest.files[cursor++];
+          const file = files[cursor++];
           await fileBlob(user, manifest.library.id, file, true, combined, true);
-          progress(++done, manifest.files.length);
+          progress(++done, files.length);
         }
       } catch (error) {
-        controller.abort();
+        controller.abort(error);
         throw error;
       }
     }),
@@ -169,14 +191,15 @@ export async function downloadLibrary(
   const failed = results.find(
     (result): result is PromiseRejectedResult => result.status === 'rejected',
   );
-  if (failed) throw failed.reason;
+  if (failed) throw controller.signal.reason ?? failed.reason;
   if (combined.aborted || generation !== privateGeneration) throw abortError(combined);
   await save(manifestKey(user, manifest.library.id), manifest);
   if (combined.aborted || generation !== privateGeneration) throw abortError(combined);
-  await save(`${user.id}:offline:${manifest.library.id}`, {
-    revision: manifest.library.revision,
-    date: new Date().toISOString(),
-  });
+  if (files.length === manifest.files.length)
+    await save(`${user.id}:offline:${manifest.library.id}`, {
+      revision: manifest.library.revision,
+      date: new Date().toISOString(),
+    });
 }
 export async function removeLibraryCache(user: User, id: string) {
   const database = await db();

@@ -243,7 +243,9 @@ class AnnotationStore {
     }, undefined);
   };
   private async flush() {
-    if (this.disposed || !navigator.onLine) return;
+    // This queue is entered explicitly. A WebView connectivity hint must not
+    // discard the user's Sync action; failed requests retain the local record.
+    if (this.disposed) return;
     const ids = this.state.annotations
       .filter((item) => item.syncStatus === 'pending' || item.syncStatus === 'deleting')
       .map((item) => item.id);

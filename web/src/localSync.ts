@@ -82,13 +82,14 @@ export async function synchronizeLibraryData(
     mergeLibraryAnnotations(user.id, library.id, state.annotations);
     mergeLibraryDocumentCopies(user.id, library.id, state.copies);
     localStorage.setItem(snapshotKey(user.id, library.id), String(Date.now()));
-    // Every changed blob is verified and persisted before switching the saved manifest.
-    // A failed transfer leaves the previous complete revision readable.
+    // Update locally saved files before publishing the new directory. Untouched
+    // remote files remain on demand unless the user saved the full archive.
     await downloadLibrary(
       user,
       manifest,
       (done, total) => progress(`项目 ${i + 1}/${ordered.length} · ${done}/${total}`),
       signal,
+      'saved',
     );
     check();
   }

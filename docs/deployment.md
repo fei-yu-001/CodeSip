@@ -51,3 +51,5 @@ sudo python3 /opt/harmonyos/services/codesip/current/deploy/backup.py
 ## 2026-11-25 本地优先阅读
 
 Web `2553ed49d2de` 开始，启动和阅读优先使用本机存档，数据更新由顶部“同步”手动发起；`GET /api/libraries/:id/reader-state` 提供同库批注/编辑版快照。无数据库格式变更。应用外壳更新继续通过头像菜单“检查应用更新”与“重载更新”，不要清除应用数据。发布记录、离线/冲突测试和真机验证限制见 [本地优先与手动同步](local-first-sync-2026-11-25.md)。
+
+Web `4ec4d9f3fc42` 起，普通同步只更新本机已保存的文件，未读文件按需读取；完整保存过的项目继续保持完整。全库下载仍使用“保存离线”。修复 ArkWeb 网络提示误报导致显式读取、批注同步受阻的问题。发布及手机结果见 [真机复测](phone-localfirst-2026-11-25.md)。

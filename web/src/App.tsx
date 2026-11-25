@@ -591,7 +591,9 @@ export default function App() {
     setOutline([]);
     (async () => {
       try {
-        const blob = await fileBlob(user, manifest.library.id, file, !offline, controller.signal);
+        // ArkWeb can report navigator.onLine=false while HTTPS still works.
+        // An explicit file open may fetch a cache miss; the request decides connectivity.
+        const blob = await fileBlob(user, manifest.library.id, file, true, controller.signal);
         const value = file.isText ? await blob.text() : '';
         if (!active || controller.signal.aborted) return;
         loadedFileRef.current = {
@@ -627,7 +629,7 @@ export default function App() {
       active = false;
       controller.abort();
     };
-  }, [user, manifest, route.file, offline, handleError, releaseImageObjectUrl]);
+  }, [user, manifest, route.file, handleError, releaseImageObjectUrl]);
   const visibleLibraries = useMemo(
     () =>
       libraries.filter(
@@ -913,7 +915,7 @@ export default function App() {
                       ? `文件已同步，${result.pending} 项本机修改仍待处理，请在批注或编辑文档中查看`
                       : result.localOnly
                         ? `同步完成；${result.localOnly} 个云端已移除的项目保留在本机`
-                        : '同步完成，内容已保存到本机',
+                        : '同步完成，本机存档已更新',
                   );
                 } catch (error) {
                   if (controller.signal.aborted) return;
