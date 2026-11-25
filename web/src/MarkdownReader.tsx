@@ -1,3 +1,5 @@
+import 'katex/dist/katex.min.css';
+import './markdown/formatting.css';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { Components } from 'hast-util-to-jsx-runtime';
@@ -178,6 +180,14 @@ export default function MarkdownReader({
       const block =
         blocks.filter((element) => Number(element.dataset.sourceLine) <= line).at(-1) || blocks[0];
       if (block) {
+        // Outline/search targets may be inside nested collapsed sections.
+        for (
+          let parent = block.parentElement;
+          parent && parent !== article;
+          parent = parent.parentElement
+        ) {
+          if (parent instanceof HTMLDetailsElement) parent.open = true;
+        }
         article.scrollTop +=
           block.getBoundingClientRect().top - article.getBoundingClientRect().top - 16;
         lastJump.current = { text: displayText, line, jump };

@@ -1,6 +1,17 @@
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import remarkFrontmatter from 'remark-frontmatter';
+import rehypeRaw from 'rehype-raw';
+import rehypeKatex from 'rehype-katex';
+import { remarkCallouts } from './callouts';
+import {
+  rehypeSanitize,
+  readerSchema,
+  preserveLiteralTags,
+  mathSourcePositions,
+} from './formatting';
 import remarkRehype from 'remark-rehype';
 import rehypeHighlight from 'rehype-highlight';
 import { defaultUrlTransform } from 'react-markdown';
@@ -52,8 +63,16 @@ function wikiLinks() {
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
+  .use(remarkFrontmatter)
+  .use(remarkMath)
   .use(wikiLinks)
+  .use(remarkCallouts)
   .use(remarkRehype, { allowDangerousHtml: true })
+  .use(preserveLiteralTags)
+  .use(rehypeRaw)
+  .use(rehypeSanitize, readerSchema)
+  .use(mathSourcePositions)
+  .use(rehypeKatex, { trust: false, strict: 'ignore', maxExpand: 500, maxSize: 20 })
   .use(rehypeHighlight, { detect: false, ignoreMissing: true })
   .freeze();
 
@@ -82,11 +101,15 @@ export function parseMarkdown(text: string): MarkdownDocument {
     weight = 0;
   };
   const prepare = (node: RootContent): { node: RootContent; weight: number } => {
-    // Raw HTML stays literal, as in ReactMarkdown; never execute imported content.
+    // Defensive fallback: unparsed nodes can only become text, never executable HTML.
     if (node.type === 'raw') return { node: { type: 'text', value: node.value }, weight: 1 };
     let count = 1;
     if (node.type === 'element') {
-      if (/^(h[1-6]|p|pre|blockquote|table|li)$/.test(node.tagName) && node.position) {
+      if (
+        (/^(h[1-6]|p|pre|blockquote|table|li|details|summary|aside)$/.test(node.tagName) ||
+          (node.properties.className as string[] | undefined)?.includes('markdown-math-block')) &&
+        node.position
+      ) {
         node.properties['data-source-line'] = node.position.start.line;
         if (/^h[1-6]$/.test(node.tagName))
           outline.push({
