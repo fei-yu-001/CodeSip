@@ -1,3 +1,4 @@
+import { readerControl } from './reader-controls';
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 const origin = 'http://127.0.0.1:4319';
@@ -32,7 +33,7 @@ test.beforeEach(async ({ page, context }) => {
     ).json()
   ).baseVersion;
   await page.goto('/');
-  await expect(page.getByRole('button', { name: '账号与退出' })).toBeVisible();
+  await expect(await readerControl(page, '账号与退出')).toBeVisible();
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
 });
 test.afterEach(async ({ request }) => {
@@ -76,12 +77,12 @@ test('first installation is quiet; account checks updates and back dismisses the
 }) => {
   await expect(page.locator('.update-chip')).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await page.getByRole('button', { name: '账号与退出' }).click();
+  await (await readerControl(page, '账号与退出')).click();
   await page.getByRole('button', { name: '检查应用更新', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '已是最新版本' })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '账号与退出' })).toBeVisible();
+  await expect(await readerControl(page, '账号与退出')).toBeVisible();
   expect(await versionOf(page)).toBe(baseVersion);
 });
 
@@ -90,8 +91,8 @@ test('real download progress can be deferred; reload preserves offline drafts an
   context,
 }, testInfo) => {
   await note(page);
-  await page.getByRole('button', { name: '保存离线', exact: true }).click();
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await (await readerControl(page, '保存离线')).click();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   await context.setOffline(true);
   await page.getByRole('button', { name: '添加笔记批注' }).click();
   await page.getByRole('textbox', { name: '批注内容' }).fill('更新后必须保留的离线草稿');
@@ -106,7 +107,7 @@ test('real download progress can be deferred; reload preserves offline drafts an
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.locator('.annotation-pill.status-pending')).toBeVisible();
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
-  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await (await readerControl(page, '同步')).click();
   await expect(page.locator('.annotation-pill.status-synced')).toBeVisible();
   await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0);
   await page.locator('article.markdown').evaluate((el) => {
@@ -166,7 +167,7 @@ test('corrupt download retains old offline shell and retries successfully', asyn
   await context.setOffline(true);
   await page.reload();
   expect(await versionOf(page)).toBe(baseVersion);
-  await expect(page.getByRole('button', { name: '账号与退出' })).toBeVisible();
+  await expect(await readerControl(page, '账号与退出')).toBeVisible();
   await check(page);
   await expect(page.getByRole('dialog', { name: '更新暂未完成' })).toBeVisible();
   await page.request.post('/__test/update-control', {

@@ -87,7 +87,13 @@ export default function ReaderWorkspace(props: WorkspaceProps) {
   return (
     <div className="reader-workspace">
       {!!documents.length && (
-        <div className="reader-tabs" ref={tabsRef} role="tablist" aria-label="已打开的文件">
+        <div
+          className="reader-tabs"
+          data-single-file={documents.length === 1}
+          ref={tabsRef}
+          role="tablist"
+          aria-label="已打开的文件"
+        >
           {documents.map((item, index) => (
             <div
               className={`reader-tab ${item.key === activeKey ? 'selected' : ''}`}

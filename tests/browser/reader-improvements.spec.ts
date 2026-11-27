@@ -1,3 +1,4 @@
+import { readerControl } from './reader-controls';
 import {
   test,
   expect,
@@ -9,7 +10,7 @@ import { zipSync, strToU8 } from 'fflate';
 
 async function syncNow(page: Page) {
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
-  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await (await readerControl(page, '同步')).click();
   await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0, {
     timeout: 30000,
   });
@@ -93,7 +94,7 @@ test('annotations persist offline, edit and delete, and save errors keep the dra
   await page.getByRole('button', { name: '保存批注', exact: true }).click();
   await syncNow(page);
   await expect(page.locator('.annotation-pill.status-synced')).toContainText('修改后的批注');
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
   await context.setOffline(true);
@@ -191,7 +192,7 @@ test('code fills the reader, wrap respects preference and long files remain scro
   const body = await page.locator('.document-body').boundingBox();
   const reader = await page.locator('.code-reader-container').boundingBox();
   expect(Math.abs(body!.width - reader!.width)).toBeLessThan(2);
-  await page.getByRole('button', { name: '自动换行', exact: true }).click();
+  await (await readerControl(page, '自动换行')).click();
   await expect(page.locator('.reader-panel:not([hidden]) .cm-content')).not.toHaveClass(
     /cm-lineWrapping/,
   );
@@ -236,7 +237,14 @@ test('themes stay synchronized across notes, home and reload', async ({ page }, 
     .getByRole('button', { name: '关闭', exact: true })
     .click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'warm-slate');
-  await page.locator('.breadcrumb').getByRole('button', { name: '学习笔记', exact: true }).click();
+  if (info.project.name === 'mobile') {
+    await page.getByRole('button', { name: '返回项目列表', exact: true }).click();
+  } else {
+    await page
+      .locator('.breadcrumb')
+      .getByRole('button', { name: '学习笔记', exact: true })
+      .click();
+  }
   await expect(page).toHaveURL(/#notes$/);
   await expect(page.getByRole('heading', { name: '学习笔记', exact: true })).toBeVisible();
   if (info.project.name === 'mobile') {
@@ -244,6 +252,7 @@ test('themes stay synchronized across notes, home and reload', async ({ page }, 
     await expect(page.locator('.theme-drawer-item.active')).toContainText('松烟暖灰');
     await page.locator('.theme-drawer-item').filter({ hasText: '羊皮纸棕' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'sepia-parchment');
+    await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   }
   await open(page, lib, 'note.md');
   await page.getByRole('button', { name: '阅读设置', exact: true }).click();
@@ -283,13 +292,13 @@ test('reading resumes, real headings navigate and explicit searches override sav
   await page.reload();
   await expect(article).toBeVisible();
   await expect.poll(() => article.evaluate((el) => el.scrollTop)).toBeGreaterThan(1200);
-  await page.getByRole('button', { name: '文件大纲', exact: true }).click();
+  await (await readerControl(page, '文件大纲')).click();
   await expect(page.locator('.outline .heading-item')).toHaveCount(48);
   await expect(page.locator('.outline')).not.toContainText('假标题');
   await page.locator('.outline').getByRole('button', { name: '章节 30', exact: true }).click();
   await expect(page.locator('.outline')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '章节 30', exact: true })).toBeInViewport();
-  await page.getByRole('button', { name: '文件大纲', exact: true }).click();
+  await (await readerControl(page, '文件大纲')).click();
   await page
     .locator('.outline')
     .getByRole('button', { name: '重复标题', exact: true })
@@ -333,7 +342,7 @@ test('back closes sheets and fullscreen, and code-only mode can be turned off', 
   await page.goBack();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(page.url()).toBe(fileURL);
-  await page.getByRole('button', { name: '文件大纲', exact: true }).click();
+  await (await readerControl(page, '文件大纲')).click();
   await page.goBack();
   await expect(page.locator('.outline')).toHaveCount(0);
   expect(page.url()).toBe(fileURL);
@@ -353,7 +362,7 @@ test('account dialog and refresh feedback replace window.confirm and provide act
   await open(page, lib, 'note.md');
 
   // 1. 头像按钮打开应用内弹窗替代 window.confirm
-  await page.getByRole('button', { name: '账号与退出' }).click();
+  await (await readerControl(page, '账号与退出')).click();
   const dialog = page.getByRole('dialog', { name: '当前账号' });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('browser');
@@ -379,9 +388,11 @@ test('account dialog and refresh feedback replace window.confirm and provide act
     await response;
     await route.continue();
   });
-  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await (await readerControl(page, '同步')).click();
   await expect(page.getByRole('button', { name: '正在同步', exact: true })).toBeDisabled();
-  await expect(page.locator('.spin-icon')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '正在同步', exact: true }).locator('svg'),
+  ).toHaveClass(/spin/);
   release();
   await expect(page.locator('.toast')).toContainText('同步完成');
 });
@@ -419,10 +430,10 @@ test('session expiry keeps user annotation drafts and active logout clears them 
   await page.getByLabel('账号', { exact: true }).fill('browser');
   await page.getByLabel('密码', { exact: true }).fill('browser-test-password');
   await page.getByRole('button', { name: '进入 CodeSip', exact: true }).click();
-  await expect(page.getByRole('button', { name: '账号与退出' })).toBeVisible();
+  await expect(await readerControl(page, '账号与退出')).toBeVisible();
   await open(page, lib, 'note.md');
   await expect(page.locator('.annotation-pill.status-pending')).toContainText('自动过期不能丢失');
-  await page.getByRole('button', { name: '账号与退出' }).click();
+  await (await readerControl(page, '账号与退出')).click();
   const dialog = page.getByRole('dialog', { name: '当前账号' });
   await expect(dialog).toContainText('本机离线副本和未同步草稿会清除');
   await dialog.getByRole('button', { name: '退出登录' }).click();
@@ -490,7 +501,7 @@ test('server annotations reach a new device, failed saves stay local and open-ed
       await route.continue();
     });
     await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
-    await page.getByRole('button', { name: '同步', exact: true }).click();
+    await (await readerControl(page, '同步')).click();
     await page.locator('.reader-panel:not([hidden]) .annotation-pill').click();
     await page.getByRole('textbox', { name: '批注内容' }).fill('编辑器里尚未提交的本机草稿');
     const existing = (await list())[0];

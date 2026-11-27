@@ -1,3 +1,4 @@
+import { readerControl } from './reader-controls';
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 const origin = 'http://127.0.0.1:4319';
@@ -75,7 +76,7 @@ test('long Markdown streams once, remains interactive and navigates to not-yet-m
     'data-render-complete',
     'false',
   );
-  await page.getByRole('button', { name: '文件大纲', exact: true }).click();
+  await (await readerControl(page, '文件大纲')).click();
   await expect(page.locator('.outline .heading-item')).toHaveCount(161);
   await page.locator('.outline').getByRole('button', { name: '分节 155', exact: true }).click();
   await expect(page.getByRole('heading', { name: '分节 155', exact: true })).toBeInViewport({

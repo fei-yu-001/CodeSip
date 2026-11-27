@@ -1,11 +1,14 @@
+import { readerControl, closeReaderTools } from './reader-controls';
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 async function syncNow(page: Page) {
+  await closeReaderTools(page);
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
-  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await (await readerControl(page, '同步')).click();
   await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0, {
     timeout: 30000,
   });
+  await closeReaderTools(page);
 }
 const origin = 'http://127.0.0.1:4319';
 let cookies: Awaited<ReturnType<BrowserContext['cookies']>>;
@@ -172,8 +175,8 @@ test('offline document drafts survive reopening and retry after reconnect', asyn
   context,
 }) => {
   const lib = await open(page);
-  await page.getByRole('button', { name: '保存离线', exact: true }).click();
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await (await readerControl(page, '保存离线')).click();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   await page.evaluate(() => navigator.serviceWorker.ready);
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
   await context.setOffline(true);
@@ -279,10 +282,10 @@ test('storage failure keeps the document editor open and expired sessions preser
   await page.getByLabel('账号', { exact: true }).fill('browser');
   await page.getByLabel('密码', { exact: true }).fill('browser-test-password');
   await page.getByRole('button', { name: '进入 CodeSip', exact: true }).click();
-  await expect(page.getByRole('button', { name: '账号与退出' })).toBeVisible();
+  await expect(await readerControl(page, '账号与退出')).toBeVisible();
   await page.goto(`/#notes/${lib.id}?file=note.md`);
   await expect(page.locator('.markdown-content')).toContainText('登录过期后仍保留的文档草稿');
-  await page.getByRole('button', { name: '账号与退出' }).click();
+  await (await readerControl(page, '账号与退出')).click();
   await expect(page.locator('.avatar-large img')).toHaveAttribute('src', '/qiqi-avatar.jpg');
   await page
     .getByRole('dialog', { name: '当前账号' })

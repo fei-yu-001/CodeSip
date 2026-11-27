@@ -1,3 +1,4 @@
+import { readerControl } from './reader-controls';
 import { test, expect, type BrowserContext } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 const origin = 'http://127.0.0.1:4319';
@@ -138,8 +139,8 @@ test('HTML folds, math, callouts and line breaks render safely and remain availa
     }),
   ).toBeTruthy();
   await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBeTruthy();
-  await page.getByRole('button', { name: '保存离线', exact: true }).click();
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await (await readerControl(page, '保存离线')).click();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   await context.setOffline(true);
   await page.reload();
   await expect(content).toHaveAttribute('data-render-complete', 'true');
@@ -161,7 +162,7 @@ test('outline jumps reveal nested collapsed HTML and retain the original Markdow
 }) => {
   const heading = page.getByRole('heading', { name: '折叠内标题', exact: true });
   await expect(heading).toBeHidden();
-  await page.getByRole('button', { name: '文件大纲', exact: true }).click();
+  await (await readerControl(page, '文件大纲')).click();
   await page.locator('.outline').getByRole('button', { name: '折叠内标题', exact: true }).click();
   await expect(heading).toBeVisible();
   await expect(heading).toBeInViewport();

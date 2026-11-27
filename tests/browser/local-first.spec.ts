@@ -1,3 +1,4 @@
+import { readerControl, closeReaderTools } from './reader-controls';
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 const origin = 'http://127.0.0.1:4319';
@@ -41,11 +42,13 @@ async function fixture(page: Page) {
   return library;
 }
 async function sync(page: Page) {
+  await closeReaderTools(page);
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
-  await page.getByRole('button', { name: '同步', exact: true }).click();
+  await (await readerControl(page, '同步')).click();
   await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0, {
     timeout: 30000,
   });
+  await closeReaderTools(page);
 }
 
 test('cached startup and navigation issue no data requests; edits in a closed document wait for explicit sync', async ({
@@ -105,8 +108,8 @@ test('interrupted sync retains the saved revision and resumes without overwritin
   page,
 }) => {
   const library = await fixture(page);
-  await page.getByRole('button', { name: '保存离线', exact: true }).click();
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await (await readerControl(page, '保存离线')).click();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   await sync(page);
   const patch = await page.request.post(`/api/libraries/${library.id}/sync`, {
     headers: { origin },
@@ -157,7 +160,7 @@ test('storage quota failure never claims a complete local archive', async ({ pag
   });
   await sync(page);
   await expect(page.locator('.toast')).toContainText('同步未完成');
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toHaveCount(0);
+  await expect(await readerControl(page, '已保存离线')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '本机 A', exact: true })).toBeVisible();
   expect(library.id).toBeTruthy();
 });
@@ -213,9 +216,9 @@ test('sync updates saved files without downloading unread files and keeps full a
   await expect(page.locator('.toast')).toContainText('同步完成');
   await expect(page.getByRole('heading', { name: '已读内容更新', exact: true })).toBeVisible();
   expect(fetched).toEqual(['a.md']);
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: '保存离线', exact: true }).click();
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await expect(await readerControl(page, '已保存离线')).toHaveCount(0);
+  await (await readerControl(page, '保存离线')).click();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   const revision = (await (await page.request.get(`/api/libraries/${library.id}/manifest`)).json())
     .library.revision;
   const add = await page.request.post(`/api/libraries/${library.id}/sync`, {
@@ -231,7 +234,7 @@ test('sync updates saved files without downloading unread files and keeps full a
   await sync(page);
   await expect(page.locator('.toast')).toContainText('同步完成');
   expect(fetched).toEqual(['d.md']);
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   await context.setOffline(true);
   await page.goto(`/#notes/${library.id}?file=d.md`);
   await expect(page.getByRole('heading', { name: '完整离线的新文件', exact: true })).toBeVisible();

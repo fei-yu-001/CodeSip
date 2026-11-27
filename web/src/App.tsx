@@ -28,6 +28,8 @@ import {
   LoaderCircle,
   LogOut,
   Menu,
+  Maximize2,
+  Minimize2,
   Moon,
   MoreHorizontal,
   Plus,
@@ -64,6 +66,8 @@ import Modal from './Modal';
 import { synchronizeLibraryData } from './localSync';
 import './sync-setup.css';
 import ReaderWorkspace from './ReaderWorkspace';
+import MobileReaderToolbar from './MobileReaderToolbar';
+import './reader-space.css';
 
 type Route = { kind: LibraryKind; id?: string; file?: string; line?: number; heading?: string };
 const readRoute = (): Route => {
@@ -290,6 +294,7 @@ export default function App() {
   const dark = theme === 'warm-slate';
   const [jump, setJump] = useState(0);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [showEmptyLibs, setShowEmptyLibs] = useState(false);
   const [notesOnly, setNotesOnly] = useState(true);
   const [wrap, setWrap] = useState(localStorage.getItem('codesip:wrap') !== 'false'),
@@ -712,6 +717,54 @@ export default function App() {
       setBusy(false);
     }
   }
+  async function synchronize() {
+    if (!user) return;
+
+    if (syncController.current || progress) return;
+    const controller = new AbortController();
+    syncController.current = controller;
+    setIsRefreshing(true);
+    try {
+      const result = await synchronizeLibraryData(
+        user,
+        setSyncProgress,
+        controller.signal,
+        route.id,
+      );
+      if (controller.signal.aborted) return;
+      setLibraries(result.libraries);
+      setOffline(false);
+      await latestLoadManifest.current();
+      notify(
+        result.pending
+          ? `文件已同步，${result.pending} 项本机修改仍待处理，请在批注或编辑文档中查看`
+          : result.localOnly
+            ? `同步完成；${result.localOnly} 个云端已移除的项目保留在本机`
+            : '同步完成，本机存档已更新',
+      );
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (error instanceof HttpError && error.status === 401) handleError(error);
+      else
+        notify(
+          `同步未完成，已有本机内容保留。${error instanceof Error ? error.message : '请联网后重试'}`,
+        );
+    } finally {
+      if (syncController.current === controller) syncController.current = null;
+      setIsRefreshing(false);
+      setSyncProgress('');
+    }
+  }
+  const enterFocus = () => {
+    setShowTree(false);
+    setShowSearch(false);
+    setShowOutline(false);
+    setFocused(true);
+  };
+  useDismissibleLayer(focused && !!route.id, () => setFocused(false));
+  useEffect(() => {
+    if (!route.id) setFocused(false);
+  }, [route.id]);
   useDismissibleLayer(showTree, () => setShowTree(false));
   useDismissibleLayer(showSearch, () => setShowSearch(false));
   useDismissibleLayer(showOutline, () => setShowOutline(false));
@@ -742,7 +795,9 @@ export default function App() {
       </>
     );
   return (
-    <div className={`app ${route.id ? 'reading' : ''}`}>
+    <div
+      className={`app ${route.id ? 'reading' : ''} ${focused && route.id ? 'reading-focused' : ''}`}
+    >
       <aside className="sidebar">
         <Brand />
         <div className="workspace-label">资料库</div>
@@ -816,42 +871,7 @@ export default function App() {
               aria-label={isRefreshing ? '正在同步' : '同步'}
               title={isRefreshing ? syncProgress : '同步云端更新和本机修改'}
               disabled={!!progress || isRefreshing}
-              onClick={async () => {
-                if (syncController.current || progress) return;
-                const controller = new AbortController();
-                syncController.current = controller;
-                setIsRefreshing(true);
-                try {
-                  const result = await synchronizeLibraryData(
-                    user,
-                    setSyncProgress,
-                    controller.signal,
-                    route.id,
-                  );
-                  if (controller.signal.aborted) return;
-                  setLibraries(result.libraries);
-                  setOffline(false);
-                  await latestLoadManifest.current();
-                  notify(
-                    result.pending
-                      ? `文件已同步，${result.pending} 项本机修改仍待处理，请在批注或编辑文档中查看`
-                      : result.localOnly
-                        ? `同步完成；${result.localOnly} 个云端已移除的项目保留在本机`
-                        : '同步完成，本机存档已更新',
-                  );
-                } catch (error) {
-                  if (controller.signal.aborted) return;
-                  if (error instanceof HttpError && error.status === 401) handleError(error);
-                  else
-                    notify(
-                      `同步未完成，已有本机内容保留。${error instanceof Error ? error.message : '请联网后重试'}`,
-                    );
-                } finally {
-                  if (syncController.current === controller) syncController.current = null;
-                  setIsRefreshing(false);
-                  setSyncProgress('');
-                }
-              }}
+              onClick={() => void synchronize()}
             >
               <RefreshCw size={17} className={isRefreshing ? 'spin-icon' : ''} />
               <span>{isRefreshing ? '同步中' : '同步'}</span>
@@ -1167,6 +1187,26 @@ export default function App() {
           </aside>
           {showTree && <div className="tree-scrim" onClick={() => setShowTree(false)} />}
           <section className="document">
+            <MobileReaderToolbar
+              path={route.file}
+              libraryName={manifest?.library.name}
+              isMarkdown={isMarkdown}
+              wrap={wrap}
+              refreshing={isRefreshing}
+              offline={offline}
+              progress={progress}
+              offlineSaved={offlineSaved}
+              hasManifest={!!manifest}
+              home={() => setRouteTo(route.kind)}
+              directory={() => setShowTree(true)}
+              focus={enterFocus}
+              synchronize={() => void synchronize()}
+              search={() => setShowSearch(true)}
+              toggleWrap={() => setWrap(!wrap)}
+              outline={() => setShowOutline(true)}
+              saveOffline={() => void saveOffline()}
+              account={() => setModal('account')}
+            />
             <div className="document-toolbar">
               <button
                 className="icon-button mobile-only"
@@ -1180,6 +1220,14 @@ export default function App() {
                 <span>{route.file?.split('/').pop() || '选择文件开始阅读'}</span>
               </div>
               <div className="document-tools">
+                <button
+                  className="icon-button"
+                  aria-label="专注阅读"
+                  title="专注阅读"
+                  onClick={enterFocus}
+                >
+                  <Maximize2 size={17} />
+                </button>
                 <button
                   className={`icon-button ${showSearch ? 'toggled' : ''}`}
                   aria-label="搜索项目内容"
@@ -1348,6 +1396,16 @@ export default function App() {
           </section>
         </div>
       </main>
+      {focused && route.id && (
+        <button
+          className="reader-focus-exit"
+          onClick={() => setFocused(false)}
+          aria-label="退出专注阅读"
+        >
+          <Minimize2 size={17} />
+          <span>退出专注</span>
+        </button>
+      )}
       <nav className="mobile-nav">
         <button
           className={route.kind === 'notes' ? 'active' : ''}

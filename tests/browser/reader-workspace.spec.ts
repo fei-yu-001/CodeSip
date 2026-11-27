@@ -1,3 +1,4 @@
+import { readerControl } from './reader-controls';
 import { test, expect, type Page } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 const origin = 'http://127.0.0.1:4319';
@@ -131,7 +132,7 @@ test('tabs retain mounted readers, scroll and folds across files and home naviga
     .toBeGreaterThan(600);
   expect(reads).toHaveLength(0);
   await page.getByRole('button', { name: '关闭文件 code.ts', exact: true }).click();
-  await expect(page.getByRole('tab')).toHaveCount(1);
+  await expect(page.locator('.reader-tabs [role=tab]')).toHaveCount(1);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
   ).toBeTruthy();
@@ -151,7 +152,7 @@ test('code zoom reconfigures the existing read-only reader and keeps fold and sc
   await panel(page).getByRole('button', { name: '缩小代码', exact: true }).click();
   await expect(editor).toHaveCSS('font-size', '14px');
   await expect(editor.locator('.cm-content')).toHaveAttribute('contenteditable', 'false');
-  await page.getByRole('button', { name: '自动换行', exact: true }).click();
+  await (await readerControl(page, '自动换行')).click();
   await editor.locator('.cm-scroller').evaluate((element) => {
     element.scrollTop = 700;
     element.scrollLeft = 120;
@@ -232,7 +233,9 @@ test('reimporting a matching ZIP updates the existing project and its open tab',
   await expect(panel(page).getByRole('heading', { name: 'Updated in place' })).toBeVisible();
   const libraries = (await (await page.request.get('/api/libraries')).json()).libraries;
   expect(libraries.filter((library: any) => library.name === 'reader-fixes')).toHaveLength(1);
-  await expect(page.getByRole('tab', { name: 'note.md', exact: true })).toHaveCount(1);
+  await expect(page.locator('.reader-tabs [role=tab]').filter({ hasText: 'note.md' })).toHaveCount(
+    1,
+  );
 });
 
 test('ambiguous project names require an explicit update target and preserve the other project', async ({
@@ -253,13 +256,11 @@ test('ambiguous project names require an explicit update target and preserve the
   try {
     await page.goto('/#notes');
     await page.getByRole('button', { name: '导入笔记', exact: true }).click();
-    await page
-      .getByLabel('选择 ZIP 文件')
-      .setInputFiles({
-        name: 'reader-fixes.zip',
-        mimeType: 'application/zip',
-        buffer: archive({ 'note.md': '# Chosen project updated' }),
-      });
+    await page.getByLabel('选择 ZIP 文件').setInputFiles({
+      name: 'reader-fixes.zip',
+      mimeType: 'application/zip',
+      buffer: archive({ 'note.md': '# Chosen project updated' }),
+    });
     await expect(page.getByRole('alert')).toContainText('存在多个同名项目');
     await expect(page.getByRole('button', { name: '导入并开始阅读' })).toBeDisabled();
     await page.getByLabel('导入目标').selectOption(libraryId);
@@ -272,4 +273,67 @@ test('ambiguous project names require an explicit update target and preserve the
   } finally {
     await page.request.delete(`/api/libraries/${otherId}`, { headers: { origin } });
   }
+});
+
+test('compact reader gives content the viewport and focus mode preserves the current editor', async ({
+  page,
+  isMobile,
+}) => {
+  if (isMobile) await page.setViewportSize({ width: 373, height: 755 });
+  await page.goto(`/#notes/${libraryId}?file=code.ts`);
+  const editor = panel(page).locator('.cm-editor');
+  await expect(editor).toBeVisible();
+  const heightRatio = () =>
+    editor.evaluate((element) => element.getBoundingClientRect().height / innerHeight);
+  if (isMobile) {
+    await expect(page.getByRole('tablist', { name: '已打开的文件' })).toHaveCount(0);
+    await expect.poll(heightRatio).toBeGreaterThan(0.86);
+    await (await readerControl(page, '自动换行')).click();
+    await page.getByRole('button', { name: '阅读工具', exact: true }).click();
+    await expect(page.getByRole('region', { name: '阅读工具' })).toHaveCount(0);
+    const currentFile = page.url();
+    await page.getByRole('button', { name: '阅读工具', exact: true }).click();
+    await page.goBack();
+    await expect(page.getByRole('region', { name: '阅读工具' })).toHaveCount(0);
+    expect(page.url()).toBe(currentFile);
+    await page.getByRole('button', { name: '阅读工具', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('region', { name: '阅读工具' })).toHaveCount(0);
+  }
+  await editor.evaluate((element) => {
+    (window as any).focusedEditor = element;
+    element.querySelector('.cm-scroller')!.scrollTop = 700;
+  });
+  await expect
+    .poll(() => editor.locator('.cm-scroller').evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(650);
+  if (isMobile) await page.getByRole('button', { name: '阅读工具', exact: true }).click();
+  await page.getByRole('button', { name: '专注阅读', exact: true }).click();
+  await expect(page.getByRole('region', { name: '阅读工具' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '退出专注阅读' })).toBeVisible();
+  await expect.poll(heightRatio).toBeGreaterThan(0.98);
+  expect(
+    await editor.evaluate((element) => element === (window as any).focusedEditor),
+  ).toBeTruthy();
+  await expect(editor.locator('.cm-content')).toHaveAttribute('contenteditable', 'false');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: '退出专注阅读' })).toHaveCount(0);
+  expect(
+    await editor.evaluate((element) => element === (window as any).focusedEditor),
+  ).toBeTruthy();
+  await expect
+    .poll(() => editor.locator('.cm-scroller').evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(650);
+  await open(page, 'note.md');
+  await expect(panel(page).locator('.markdown-content')).toHaveAttribute(
+    'data-render-complete',
+    'true',
+  );
+  await expect(page.getByRole('tab', { name: 'code.ts', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '专注阅读', exact: true }).click();
+  await expect(panel(page).getByRole('navigation', { name: '阅读操作' })).toBeHidden();
+  await page.getByRole('button', { name: '退出专注阅读' }).click();
+  await expect(panel(page).getByRole('navigation', { name: '阅读操作' })).toBeVisible();
+  await page.getByRole('tab', { name: 'code.ts', exact: true }).click();
+  if (isMobile) await expect.poll(heightRatio).toBeGreaterThan(0.8);
 });
