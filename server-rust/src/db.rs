@@ -278,9 +278,13 @@ pub fn create_library(db: &Connection, uid: &str, input: &Value) -> Result<Value
 }
 pub fn manifest(db: &Connection, uid: &str, id: &str) -> Result<Value> {
     let tx = db.unchecked_transaction()?;
-    let lib = library(&tx, uid, id)?;
-    let files:Vec<Value>=tx.prepare("SELECT path,hash,size,is_text,media_type FROM files WHERE library_id=? ORDER BY path")?.query_map([id],|r|Ok(json!({"path":r.get::<_,String>(0)?,"hash":r.get::<_,String>(1)?,"size":r.get::<_,i64>(2)?,"isText":r.get::<_,bool>(3)?,"mediaType":r.get::<_,String>(4)?})))?.collect::<rusqlite::Result<_>>()?;
+    let result = manifest_inner(&tx, uid, id)?;
     tx.commit()?;
+    Ok(result)
+}
+fn manifest_inner(db: &Connection, uid: &str, id: &str) -> Result<Value> {
+    let lib = library(db, uid, id)?;
+    let files:Vec<Value>=db.prepare("SELECT path,hash,size,is_text,media_type FROM files WHERE library_id=? ORDER BY path")?.query_map([id],|r|Ok(json!({"path":r.get::<_,String>(0)?,"hash":r.get::<_,String>(1)?,"size":r.get::<_,i64>(2)?,"isText":r.get::<_,bool>(3)?,"mediaType":r.get::<_,String>(4)?})))?.collect::<rusqlite::Result<_>>()?;
     Ok(json!({"library":lib,"files":files}))
 }
 pub struct File {
@@ -369,6 +373,21 @@ pub fn put_inner(
         params![iso_now(), id],
     )?;
     Ok(json!({"revision":expected+1}))
+}
+pub fn remove_file(db: &Connection, uid: &str, id: &str, input: &Value) -> Result<Value> {
+    let revision = safe_int(&input["baseRevision"])
+        .filter(|value| *value >= 0)
+        .ok_or_else(|| ApiError::new(400, "文件删除请求格式无效"))?;
+    let path = files::clean_path(string(input, "path")?)?;
+    let tx = transaction(db)?;
+    library(&tx, uid, id)?;
+    // Check the displayed version before deleting either notes or imported code.
+    // Reader annotations and personal copies remain recoverable on reimport.
+    file(&tx, uid, id, &path)?;
+    put_inner(&tx, id, &[], &[path], revision)?;
+    let result = manifest_inner(&tx, uid, id)?;
+    tx.commit()?;
+    Ok(result)
 }
 pub fn sync(db: &Connection, uid: &str, id: &str, patch: &Value) -> Result<Value> {
     let lib = library(db, uid, id)?;

@@ -543,12 +543,14 @@ fn dispatch(
     }
     if segments.len() >= 3 && segments[0] == "api" && segments[1] == "libraries" {
         let id = segments[2];
-        if segments
-            .get(3)
-            .is_some_and(|s| *s == "annotations" || *s == "document-copy" || *s == "reader-state")
-            && (session_cookie(headers).is_none()
-                || headers.contains_key("authorization")
-                || identity.library_id.is_some())
+        if segments.get(3).is_some_and(|s| {
+            *s == "annotations"
+                || *s == "document-copy"
+                || *s == "reader-state"
+                || (*s == "file" && verb == "DELETE")
+        }) && (session_cookie(headers).is_none()
+            || headers.contains_key("authorization")
+            || identity.library_id.is_some())
         {
             return Err(ApiError::new(403, "请通过网页登录后管理阅读内容"));
         }
@@ -589,6 +591,7 @@ fn dispatch(
                 output.reading = true;
                 return Ok(output);
             }
+            ("DELETE", "file") => db::remove_file(db, uid, id, &input)?,
             ("GET", "search") => db::search(db, uid, id, q("q"))?,
             ("GET", "annotations") => reader::annotations(db, uid, id, q("path"))?,
             ("GET", "document-copy") => json!({"copy":reader::get_copy(db,uid,id,q("path"))?}),

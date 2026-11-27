@@ -226,6 +226,14 @@ export class Store {
       throw error;
     }
   }
+  removeFile(userId: string, id: string, input: { path: string; baseRevision: number }) {
+    if (!input || !Number.isSafeInteger(input.baseRevision) || input.baseRevision < 0)
+      throw new ApiError(400, '文件删除请求格式无效');
+    const path = cleanPath(input.path);
+    this.file(userId, id, path);
+    this.put(id, [], [path], input.baseRevision);
+    return this.manifest(userId, id);
+  }
   sync(userId: string, id: string, patch: SyncPatch) {
     const lib = this.library(userId, id);
     if (lib.kind !== 'notes') throw new ApiError(403, '同步令牌仅用于笔记库');

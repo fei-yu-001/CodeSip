@@ -44,7 +44,14 @@ import {
   WrapText,
   X,
 } from 'lucide-react';
-import type { Library, LibraryKind, Manifest, SearchResult, User } from '../../shared/types';
+import type {
+  FileEntry,
+  Library,
+  LibraryKind,
+  Manifest,
+  SearchResult,
+  User,
+} from '../../shared/types';
 import {
   api,
   HttpError,
@@ -59,6 +66,8 @@ import {
   formatBytes,
   relativeDate,
   removeLibraryCache,
+  cacheFileRemoval,
+  remove,
 } from './api';
 import { readTheme, type ReaderTheme, type OutlineItem } from './readerState';
 import { navigateHash, useDismissibleLayer } from './readerNavigation';
@@ -68,7 +77,11 @@ import './sync-setup.css';
 import ReaderWorkspace from './ReaderWorkspace';
 import MobileReaderToolbar from './MobileReaderToolbar';
 import './reader-space.css';
+import LibraryCard from './LibraryCard';
+import { removeLibraryReaderData } from './readerIdentity';
+import './file-management.css';
 
+type DeleteTarget = { library: Library; file?: FileEntry };
 type Route = { kind: LibraryKind; id?: string; file?: string; line?: number; heading?: string };
 const readRoute = (): Route => {
   const [path, query] = location.hash.slice(1).split('?');
@@ -211,33 +224,47 @@ function Tree({
   nodes,
   active,
   onOpen,
+  onDelete,
+  deleteDisabled,
   depth = 0,
 }: {
   nodes: TreeNode[];
   active?: string;
   onOpen: (s: string) => void;
+  onDelete: (path: string) => void;
+  deleteDisabled: boolean;
   depth?: number;
 }) {
   return (
     <>
       {nodes.map((node) =>
         node.file ? (
-          <button
-            key={node.path}
-            className={`tree-file ${node.path === active ? 'active' : ''}`}
-            style={{ paddingLeft: 14 + depth * 16 }}
-            onClick={() => onOpen(node.path)}
-            title={node.path}
-          >
-            {/\.md$/i.test(node.name) ? (
-              <FileText size={15} />
-            ) : /\.(png|jpe?g|webp|gif|svg|avif|bmp|ico)$/i.test(node.name) ? (
-              <ImageIcon size={15} />
-            ) : (
-              <FileCode2 size={15} />
-            )}
-            <span>{node.name}</span>
-          </button>
+          <div key={node.path} className="tree-file-row">
+            <button
+              className={`tree-file ${node.path === active ? 'active' : ''}`}
+              style={{ paddingLeft: 14 + depth * 16 }}
+              onClick={() => onOpen(node.path)}
+              title={node.path}
+            >
+              {/\.md$/i.test(node.name) ? (
+                <FileText size={15} />
+              ) : /\.(png|jpe?g|webp|gif|svg|avif|bmp|ico)$/i.test(node.name) ? (
+                <ImageIcon size={15} />
+              ) : (
+                <FileCode2 size={15} />
+              )}
+              <span>{node.name}</span>
+            </button>
+            <button
+              className="icon-button tree-file-delete"
+              aria-label={`删除文件 ${node.path}`}
+              title="删除文件"
+              disabled={deleteDisabled}
+              onClick={() => onDelete(node.path)}
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
         ) : (
           <details key={node.path} open={depth < 2}>
             <summary style={{ paddingLeft: 12 + depth * 16 }}>
@@ -245,7 +272,14 @@ function Tree({
               <Folder size={15} />
               <span>{node.name}</span>
             </summary>
-            <Tree nodes={node.children} active={active} onOpen={onOpen} depth={depth + 1} />
+            <Tree
+              nodes={node.children}
+              active={active}
+              onOpen={onOpen}
+              onDelete={onDelete}
+              deleteDisabled={deleteDisabled}
+              depth={depth + 1}
+            />
           </details>
         ),
       )}
@@ -276,6 +310,9 @@ export default function App() {
     [token, setToken] = useState(''),
     [createdSyncLibrary, setCreatedSyncLibrary] = useState<Library>(),
     [deletedLibraryId, setDeletedLibraryId] = useState<string>(),
+    [deletedFile, setDeletedFile] = useState<{ libraryId: string; path: string }>(),
+    [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(),
+    [deleteError, setDeleteError] = useState(''),
     [progress, setProgress] = useState(''),
     [isRefreshing, setIsRefreshing] = useState(false),
     [outline, setOutline] = useState<OutlineItem[]>([]);
@@ -653,7 +690,7 @@ export default function App() {
     }
   }
   async function saveOffline() {
-    if (!user || !manifest) return;
+    if (!user || !manifest || busy || isRefreshing) return;
     setProgress('准备保存…');
     try {
       await downloadLibrary(user, manifest, (done, total) => setProgress(`${done} / ${total}`));
@@ -700,19 +737,86 @@ export default function App() {
       if (seq === searchSeq.current) setSearchBusy(false);
     }
   }
-  async function removeLibrary() {
-    if (!user || !manifest) return;
+  const requestDelete = (library: Library, file?: FileEntry) => {
+    if (busy || isRefreshing || progress) return;
+    setDeleteTarget({ library, file });
+    setDeleteError('');
+    setShowTree(false);
+    setModal('delete');
+  };
+  async function removeSelected() {
+    if (!user || !deleteTarget || busy || isRefreshing || progress) return;
+    const target = deleteTarget;
+    const id = target.library.id;
+    const generation = cacheGeneration();
     setBusy(true);
+    setDeleteError('');
     try {
-      await api(`/libraries/${manifest.library.id}`, { method: 'DELETE' });
-      setDeletedLibraryId(route.id);
-      await removeLibraryCache(user, manifest.library.id);
+      const updated = target.file
+        ? await api<Manifest>(`/libraries/${id}/file`, {
+            method: 'DELETE',
+            body: JSON.stringify({ path: target.file.path, baseRevision: target.library.revision }),
+          })
+        : await api(`/libraries/${id}`, { method: 'DELETE' })
+            .catch((error) => {
+              if (!(error instanceof HttpError && error.status === 404)) throw error;
+            })
+            .then(() => undefined);
+      if (generation !== cacheGeneration()) return;
+      if (routeScopeRef.current.id === id) manifestSeq.current++;
+      searchSeq.current++;
+      setResults(null);
+      let localError = false;
+      if (updated && target.file) {
+        setDeletedFile({ libraryId: id, path: target.file.path });
+        setManifest((current) => (current?.library.id === id ? updated : current));
+        setLibraries((current) =>
+          current.map((library) => (library.id === id ? updated.library : library)),
+        );
+        try {
+          await cacheFileRemoval(user, updated);
+        } catch {
+          localError = true;
+          // Invalidate a stale directory even when storage cannot publish the new one.
+          await Promise.allSettled([
+            remove(manifestKey(user, id)),
+            remove(`${user.id}:offline:${id}`),
+          ]);
+        }
+      } else {
+        setDeletedLibraryId(id);
+        setLibraries((current) => current.filter((library) => library.id !== id));
+        if (routeScopeRef.current.id === id) {
+          setManifest(undefined);
+          setRouteTo(target.library.kind);
+        }
+        try {
+          await removeLibraryCache(user, id);
+          removeLibraryReaderData(user.id, id);
+        } catch {
+          localError = true;
+        }
+      }
+      if (generation !== cacheGeneration()) return;
       setModal(null);
-      setRouteTo(route.kind);
-      await refresh(true);
-      notify('已删除服务端副本，电脑上的原文件不受影响');
-    } catch (e) {
-      handleError(e);
+      notify(
+        localError
+          ? '云端已删除，本机清理未完成，请联网后重新同步'
+          : target.file
+            ? '文件已删除，电脑原文件保留'
+            : '项目已删除，电脑原文件保留',
+      );
+    } catch (error) {
+      if (generation !== cacheGeneration()) return;
+      if (error instanceof HttpError && error.status === 401) handleError(error);
+      else
+        setDeleteError(
+          error instanceof HttpError && error.status === 409
+            ? '项目内容已更新，请取消删除并同步后重新确认。'
+            : error instanceof HttpError
+              ? error.message
+              : '未能连接服务，删除未确认。请联网后重试。',
+        );
     } finally {
       setBusy(false);
     }
@@ -720,7 +824,7 @@ export default function App() {
   async function synchronize() {
     if (!user) return;
 
-    if (syncController.current || progress) return;
+    if (syncController.current || progress || busy) return;
     const controller = new AbortController();
     syncController.current = controller;
     setIsRefreshing(true);
@@ -963,30 +1067,14 @@ export default function App() {
                   <div className="library-grid">
                     {(activeLibraries.length > 0 ? activeLibraries : visibleLibraries).map(
                       (library, i) => (
-                        <button
-                          className="library-card"
+                        <LibraryCard
                           key={library.id}
-                          onClick={() => setRouteTo(library.kind, library.id)}
-                        >
-                          <div className="card-top">
-                            <div className={`project-icon shade-${i % 3}`}>
-                              {library.kind === 'code' ? (
-                                <FolderOpen size={24} />
-                              ) : (
-                                <BookOpen size={23} />
-                              )}
-                            </div>
-                            <ArrowRight size={19} />
-                          </div>
-                          <h3>{library.name}</h3>
-                          <p>
-                            {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
-                          </p>
-                          <div className="card-divider" />
-                          <div className="card-footer">
-                            <span>{relativeDate(library.updatedAt)}</span>
-                          </div>
-                        </button>
+                          library={library}
+                          index={i}
+                          open={() => setRouteTo(library.kind, library.id)}
+                          remove={() => requestDelete(library)}
+                          disabled={busy || isRefreshing || !!progress}
+                        />
                       ),
                     )}
                     <button
@@ -1014,30 +1102,14 @@ export default function App() {
                       {showEmptyLibs && (
                         <div className="library-grid folded-grid">
                           {emptyLibraries.map((library, i) => (
-                            <button
-                              className="library-card"
+                            <LibraryCard
                               key={library.id}
-                              onClick={() => setRouteTo(library.kind, library.id)}
-                            >
-                              <div className="card-top">
-                                <div className={`project-icon shade-${i % 3}`}>
-                                  {library.kind === 'code' ? (
-                                    <FolderOpen size={24} />
-                                  ) : (
-                                    <BookOpen size={23} />
-                                  )}
-                                </div>
-                                <ArrowRight size={19} />
-                              </div>
-                              <h3>{library.name}</h3>
-                              <p>
-                                {library.fileCount} 个文件 · {formatBytes(library.totalBytes)}
-                              </p>
-                              <div className="card-divider" />
-                              <div className="card-footer">
-                                <span>{relativeDate(library.updatedAt)}</span>
-                              </div>
-                            </button>
+                              library={library}
+                              index={i}
+                              open={() => setRouteTo(library.kind, library.id)}
+                              remove={() => requestDelete(library)}
+                              disabled={busy || isRefreshing || !!progress}
+                            />
                           ))}
                         </div>
                       )}
@@ -1137,7 +1209,18 @@ export default function App() {
             )}
             <div className="tree">
               {tree.length ? (
-                <Tree nodes={tree} active={route.file} onOpen={openFile} />
+                <Tree
+                  nodes={tree}
+                  active={route.file}
+                  onOpen={openFile}
+                  deleteDisabled={
+                    busy || isRefreshing || !!progress || manifest?.library.id !== route.id
+                  }
+                  onDelete={(path) => {
+                    const file = manifest?.files.find((entry) => entry.path === path);
+                    if (manifest && file) requestDelete(manifest.library, file);
+                  }}
+                />
               ) : (
                 <p className="muted tree-empty">{manifest ? '还没有文件' : '正在读取目录…'}</p>
               )}
@@ -1177,9 +1260,15 @@ export default function App() {
               <button
                 className="icon-button"
                 aria-label="删除项目"
-                title="删除服务端副本"
-                disabled={offline}
-                onClick={() => setModal('delete')}
+                title="删除整个项目"
+                disabled={
+                  !manifest ||
+                  manifest.library.id !== route.id ||
+                  busy ||
+                  isRefreshing ||
+                  !!progress
+                }
+                onClick={() => manifest && requestDelete(manifest.library)}
               >
                 <Trash2 size={15} />
               </button>
@@ -1321,6 +1410,7 @@ export default function App() {
                 manifest={manifest}
                 libraryId={route.id}
                 deletedLibraryId={deletedLibraryId}
+                deletedFile={deletedFile}
                 path={route.file}
                 line={route.line}
                 heading={route.heading}
@@ -1692,22 +1782,39 @@ export default function App() {
           </p>
         </Modal>
       )}
-      {modal === 'delete' && (
-        <Modal title="删除服务端副本" close={() => !busy && setModal(null)}>
+      {modal === 'delete' && deleteTarget && (
+        <Modal
+          title={deleteTarget.file ? '删除文件' : '删除项目'}
+          close={() => !busy && setModal(null)}
+        >
+          <div className="delete-target">
+            <small>
+              {deleteTarget.file
+                ? deleteTarget.library.name
+                : `${deleteTarget.library.fileCount} 个文件 · ${formatBytes(deleteTarget.library.totalBytes)}`}
+            </small>
+            <strong>{deleteTarget.file?.path || deleteTarget.library.name}</strong>
+          </div>
           <p className="modal-intro">
-            确认删除「{manifest?.library.name}
-            」及本机的离线副本？电脑上的原文件会保留，已有插件连接会失效。
+            {deleteTarget.file
+              ? '删除 CodeSip 中的这份文件和本机离线副本，批注与编辑版保留。电脑原文件仍在，再次同步或导入时可能重新出现。'
+              : '删除整个项目及本机离线副本，项目内的批注和编辑版也会删除。电脑原文件保留，已有插件连接会失效。'}
           </p>
+          {deleteError && (
+            <p className="delete-feedback" role="alert">
+              {deleteError}
+            </p>
+          )}
           <div className="modal-buttons">
-            <button className="button secondary" onClick={() => setModal(null)}>
+            <button className="button secondary" disabled={busy} onClick={() => setModal(null)}>
               取消
             </button>
             <button
               className="button danger-fill"
               disabled={busy}
-              onClick={() => void removeLibrary()}
+              onClick={() => void removeSelected()}
             >
-              {busy ? '删除中…' : '确认删除'}
+              {busy ? '删除中…' : deleteTarget.file ? '确认删除文件' : '确认删除项目'}
             </button>
           </div>
         </Modal>

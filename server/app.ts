@@ -315,6 +315,11 @@ export async function buildApp(options: AppOptions) {
         .send(Buffer.from(row.content));
     },
   );
+  app.delete<{ Params: { id: string }; Body: { path: string; baseRevision: number } }>(
+    '/api/libraries/:id/file',
+    { preHandler: readerSession, bodyLimit: 4096 },
+    async (req) => store.removeFile(req.identity!.user.id, req.params.id, req.body),
+  );
   app.get<{ Params: { id: string }; Querystring: { q: string } }>(
     '/api/libraries/:id/search',
     async (req) => ({

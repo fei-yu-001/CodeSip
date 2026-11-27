@@ -281,3 +281,14 @@ window.addEventListener('codesip:private-data-cleared', () => {
   stores.forEach((store) => store.dispose());
   stores.clear();
 });
+
+window.addEventListener('codesip:library-removed', (event) => {
+  const { userId, libraryId } = (event as CustomEvent<{ userId: string; libraryId: string }>)
+    .detail;
+  for (const [key, store] of stores) {
+    if (key.includes(`:v2:${userId}:${libraryId}:`)) {
+      store.dispose();
+      stores.delete(key);
+    }
+  }
+});

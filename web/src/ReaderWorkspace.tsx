@@ -16,6 +16,7 @@ interface WorkspaceProps {
   user: User;
   manifest?: Manifest;
   deletedLibraryId?: string;
+  deletedFile?: { libraryId: string; path: string };
   libraryId?: string;
   path?: string;
   line?: number;
@@ -66,6 +67,22 @@ export default function ReaderWorkspace(props: WorkspaceProps) {
       return next;
     });
   }, [manifest, libraryId, path, activeKey]);
+  const handledDeletion = useRef<WorkspaceProps['deletedFile']>(undefined);
+  useEffect(() => {
+    const target = props.deletedFile;
+    if (!target || target === handledDeletion.current) return;
+    handledDeletion.current = target;
+    const removedKey = documentKey(target.libraryId, target.path);
+    const remaining = documents.filter((item) => item.key !== removedKey);
+    setDocuments((items) => items.filter((item) => item.key !== removedKey));
+    if (activeKey === removedKey) {
+      const next =
+        remaining.find((item) => item.manifest.library.id === target.libraryId) || remaining.at(-1);
+      if (next) navigate(next.manifest.library.kind, next.manifest.library.id, next.path);
+      else if (manifest?.library.id === target.libraryId)
+        navigate(manifest.library.kind, target.libraryId, manifest.files[0]?.path);
+    }
+  }, [props.deletedFile, documents, activeKey, manifest, navigate]);
   useEffect(() => {
     tabsRef.current
       ?.querySelector('[aria-selected="true"]')

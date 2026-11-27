@@ -201,8 +201,49 @@ export async function downloadLibrary(
       date: new Date().toISOString(),
     });
 }
-export async function removeLibraryCache(user: User, id: string) {
+// Publish a successful deletion and its local directory in one transaction.
+// Blobs are keyed by hash: identical files must keep their shared cached bytes.
+export async function cacheFileRemoval(user: User, manifest: Manifest) {
+  const generation = privateGeneration;
   const database = await db();
+  if (generation !== privateGeneration) throw abortError();
+  const id = manifest.library.id;
+  const keep = new Set(manifest.files.map((file) => blobKey(user, id, file.hash)));
+  await new Promise<void>((resolve, reject) => {
+    const tx = database.transaction('cache', 'readwrite');
+    const store = tx.objectStore('cache');
+    const prefix = `${user.id}:blob:${id}:`;
+    const keys = store.getAllKeys(IDBKeyRange.bound(prefix, prefix + '\uffff'));
+    keys.onsuccess = () => {
+      const available = new Set(keys.result.map(String));
+      for (const key of available) if (!keep.has(key)) store.delete(key);
+      if ([...keep].every((key) => available.has(key)))
+        store.put(
+          { revision: manifest.library.revision, date: new Date().toISOString() },
+          `${user.id}:offline:${id}`,
+        );
+      else store.delete(`${user.id}:offline:${id}`);
+    };
+    store.put(manifest, manifestKey(user, id));
+    const libraries = store.get(`${user.id}:libraries`);
+    libraries.onsuccess = () => {
+      if (Array.isArray(libraries.result))
+        store.put(
+          (libraries.result as Library[]).map((library) =>
+            library.id === id ? manifest.library : library,
+          ),
+          `${user.id}:libraries`,
+        );
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+export async function removeLibraryCache(user: User, id: string) {
+  const generation = privateGeneration;
+  const database = await db();
+  if (generation !== privateGeneration) throw abortError();
   await new Promise<void>((resolve, reject) => {
     const tx = database.transaction('cache', 'readwrite');
     const store = tx.objectStore('cache');
@@ -219,6 +260,15 @@ export async function removeLibraryCache(user: User, id: string) {
         item.delete();
       item.continue();
     };
+    const libraries = store.get(`${user.id}:libraries`);
+    libraries.onsuccess = () => {
+      if (Array.isArray(libraries.result))
+        store.put(
+          (libraries.result as Library[]).filter((library) => library.id !== id),
+          `${user.id}:libraries`,
+        );
+    };
+    tx.onabort = () => reject(tx.error);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });

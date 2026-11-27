@@ -36,3 +36,18 @@ export function wasReaderLoaded(kind: string, identity: ReaderIdentity) {
     localStorage.getItem(snapshotKey(identity.userId, identity.libraryId))
   );
 }
+
+export function removeLibraryReaderData(userId: string, libraryId: string) {
+  window.dispatchEvent(
+    new CustomEvent('codesip:library-removed', { detail: { userId, libraryId } }),
+  );
+  for (const key of Object.keys(localStorage)) {
+    if (
+      (key.startsWith('codesip:') && key.includes(`:v2:${userId}:${libraryId}:`)) ||
+      key === snapshotKey(userId, libraryId) ||
+      key === `codesip:reading:${userId}:${libraryId}` ||
+      key === `codesip:reading:${libraryId}`
+    )
+      localStorage.removeItem(key);
+  }
+}
