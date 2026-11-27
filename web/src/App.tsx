@@ -1,13 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  lazy,
-  Suspense,
-  type FormEvent,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowDownToLine,
@@ -72,11 +63,9 @@ import { navigateHash, useDismissibleLayer } from './readerNavigation';
 import Modal from './Modal';
 import { synchronizeLibraryData } from './localSync';
 import './sync-setup.css';
-const CodeReader = lazy(() => import('./CodeReader'));
+import ReaderWorkspace from './ReaderWorkspace';
 
-const MarkdownReader = lazy(() => import('./MarkdownReader'));
-
-type Route = { kind: LibraryKind; id?: string; file?: string; line?: number };
+type Route = { kind: LibraryKind; id?: string; file?: string; line?: number; heading?: string };
 const readRoute = (): Route => {
   const [path, query] = location.hash.slice(1).split('?');
   const [kind, id] = path.split('/');
@@ -85,6 +74,7 @@ const readRoute = (): Route => {
     kind: kind === 'notes' ? 'notes' : 'code',
     id: id || undefined,
     file: params.get('file') || undefined,
+    heading: params.get('heading') || undefined,
     line: params.has('line') ? Math.max(1, Math.floor(Number(params.get('line')) || 1)) : undefined,
   };
 };
@@ -267,10 +257,7 @@ export default function App() {
   const [route, setRoute] = useState(readRoute),
     [libraries, setLibraries] = useState<Library[]>([]),
     [manifest, setManifest] = useState<Manifest>(),
-    [text, setText] = useState(''),
-    [fileError, setFileError] = useState(''),
-    [busy, setBusy] = useState(false),
-    [fileBusy, setFileBusy] = useState(false);
+    [busy, setBusy] = useState(false);
   const [query, setQuery] = useState(''),
     [fileFilter, setFileFilter] = useState(''),
     [results, setResults] = useState<SearchResult[] | null>(null),
@@ -281,8 +268,10 @@ export default function App() {
   const [modal, setModal] = useState<'import' | 'connect' | 'delete' | 'account' | null>(null),
     [name, setName] = useState(''),
     [zip, setZip] = useState<File | null>(null),
+    [importTarget, setImportTarget] = useState('auto'),
     [token, setToken] = useState(''),
     [createdSyncLibrary, setCreatedSyncLibrary] = useState<Library>(),
+    [deletedLibraryId, setDeletedLibraryId] = useState<string>(),
     [progress, setProgress] = useState(''),
     [isRefreshing, setIsRefreshing] = useState(false),
     [outline, setOutline] = useState<OutlineItem[]>([]);
@@ -304,8 +293,7 @@ export default function App() {
   const [showEmptyLibs, setShowEmptyLibs] = useState(false);
   const [notesOnly, setNotesOnly] = useState(true);
   const [wrap, setWrap] = useState(localStorage.getItem('codesip:wrap') !== 'false'),
-    [offlineSaved, setOfflineSaved] = useState(false),
-    [blobUrl, setBlobUrl] = useState('');
+    [offlineSaved, setOfflineSaved] = useState(false);
   const notify = useCallback((value: string) => setMessage(value), []);
   const syncController = useRef<AbortController | null>(null);
   const [syncProgress, setSyncProgress] = useState('');
@@ -319,28 +307,18 @@ export default function App() {
   }, [notify]);
   const searchSeq = useRef(0);
   const manifestSeq = useRef(0);
-  const loadedFileRef = useRef<{
-    userId: string;
-    libraryId: string;
-    path: string;
-    hash: string;
-  } | null>(null);
-  const imageObjectUrlRef = useRef('');
-  const releaseImageObjectUrl = useCallback(() => {
-    if (imageObjectUrlRef.current) {
-      URL.revokeObjectURL(imageObjectUrlRef.current);
-      imageObjectUrlRef.current = '';
-    }
-  }, []);
-  useEffect(() => releaseImageObjectUrl, [releaseImageObjectUrl]);
   const routeScopeRef = useRef({ kind: route.kind, id: route.id });
   routeScopeRef.current = { kind: route.kind, id: route.id };
-  const setRouteTo = useCallback((kind: LibraryKind, id?: string, file?: string, line?: number) => {
-    const query = file
-      ? `?file=${encodeURIComponent(file)}${line !== undefined ? `&line=${line}` : ''}`
-      : '';
-    navigateHash(`${kind}${id ? '/' + id : ''}${query}`);
-  }, []);
+  const setRouteTo = useCallback(
+    (kind: LibraryKind, id?: string, file?: string, line?: number, heading?: string) => {
+      if (line !== undefined || heading !== undefined) setJump((value) => value + 1);
+      const query = file
+        ? `?file=${encodeURIComponent(file)}${line !== undefined ? `&line=${line}` : ''}${heading ? `&heading=${encodeURIComponent(heading)}` : ''}`
+        : '';
+      navigateHash(`${kind}${id ? '/' + id : ''}${query}`);
+    },
+    [],
+  );
   const logoutLocal = useCallback(async (preserveDrafts = false) => {
     manifestSeq.current++;
     syncController.current?.abort();
@@ -549,87 +527,6 @@ export default function App() {
       active = false;
     };
   }, [user, manifest]);
-  useEffect(() => {
-    if (!user || !manifest || !route.file) {
-      loadedFileRef.current = null;
-      releaseImageObjectUrl();
-      setText('');
-      setBlobUrl('');
-      setFileError('');
-      setFileBusy(false);
-      return;
-    }
-    const file = manifest.files.find((f) => f.path === route.file);
-    if (!file) {
-      loadedFileRef.current = null;
-      releaseImageObjectUrl();
-      setText('');
-      setBlobUrl('');
-      setOutline([]);
-      setFileError('这份文件已移动或删除，请从目录重新选择');
-      setFileBusy(false);
-      return;
-    }
-    const loaded = loadedFileRef.current;
-    if (
-      loaded &&
-      loaded.userId === user.id &&
-      loaded.libraryId === manifest.library.id &&
-      loaded.path === file.path &&
-      loaded.hash === file.hash
-    ) {
-      return;
-    }
-    let active = true;
-    const controller = new AbortController();
-    loadedFileRef.current = null;
-    releaseImageObjectUrl();
-    setText('');
-    setBlobUrl('');
-    setFileBusy(true);
-    setFileError('');
-    setOutline([]);
-    (async () => {
-      try {
-        // ArkWeb can report navigator.onLine=false while HTTPS still works.
-        // An explicit file open may fetch a cache miss; the request decides connectivity.
-        const blob = await fileBlob(user, manifest.library.id, file, true, controller.signal);
-        const value = file.isText ? await blob.text() : '';
-        if (!active || controller.signal.aborted) return;
-        loadedFileRef.current = {
-          userId: user.id,
-          libraryId: manifest.library.id,
-          path: file.path,
-          hash: file.hash,
-        };
-        setText(value);
-        if (file.mediaType.startsWith('image/')) {
-          releaseImageObjectUrl();
-          const objectUrl = URL.createObjectURL(blob);
-          imageObjectUrlRef.current = objectUrl;
-          setBlobUrl(objectUrl);
-        } else {
-          setBlobUrl('');
-        }
-        try {
-          localStorage.setItem(`codesip:reading:${user.id}:${manifest.library.id}`, file.path);
-        } catch {
-          /* Reading remains available. */
-        }
-      } catch (e: any) {
-        if (!active || controller.signal.aborted || e?.name === 'AbortError') return;
-        loadedFileRef.current = null;
-        setFileError(e.message);
-        if (e instanceof HttpError && e.status === 401) handleError(e);
-      } finally {
-        if (active) setFileBusy(false);
-      }
-    })();
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [user, manifest, route.file, handleError, releaseImageObjectUrl]);
   const visibleLibraries = useMemo(
     () =>
       libraries.filter(
@@ -671,7 +568,6 @@ export default function App() {
   const isMarkdown = !!route.file && /\.md(?:own)?$/i.test(route.file);
   const openFile = useCallback(
     (path: string, line?: number) => {
-      if (line !== undefined) setJump((value) => value + 1);
       const { kind, id } = routeScopeRef.current;
       setRouteTo(kind, id, path, line);
       setShowSearch(false);
@@ -680,24 +576,49 @@ export default function App() {
     },
     [setRouteTo],
   );
+  const importName = name.trim() || zip?.name.replace(/\.zip$/i, '') || '';
+  const matchingImports = libraries.filter(
+    (lib) => lib.kind === route.kind && lib.name === importName,
+  );
+  const updateTarget =
+    importTarget === 'auto'
+      ? matchingImports.length === 1
+        ? matchingImports[0]
+        : undefined
+      : libraries.find((lib) => lib.id === importTarget && lib.kind === route.kind);
+  const ambiguousImport = importTarget === 'auto' && matchingImports.length > 1;
+  useEffect(() => {
+    if (modal !== 'import') {
+      setImportTarget('auto');
+      setZip(null);
+    }
+  }, [modal]);
   async function doImport(event: FormEvent) {
     event.preventDefault();
-    if (!zip) return;
+    if (!zip || ambiguousImport) return;
     setBusy(true);
     try {
       const form = new FormData();
       form.append('file', zip);
       const data = await api<{ library: Library }>(
-        `/import?kind=${route.kind}&name=${encodeURIComponent(name.trim() || zip.name.replace(/\.zip$/i, ''))}`,
+        `/import?kind=${route.kind}&name=${encodeURIComponent(importName)}${updateTarget ? `&libraryId=${encodeURIComponent(updateTarget.id)}&baseRevision=${updateTarget.revision}` : ''}`,
         { method: 'POST', body: form },
       );
       await refresh(true);
+      const updated = await api<Manifest>(`/libraries/${data.library.id}/manifest`);
+      await save(manifestKey(user!, data.library.id), updated);
+      if (route.id === data.library.id) setManifest(updated);
+      const retained =
+        route.id === data.library.id && updated.files.some((file) => file.path === route.file)
+          ? route.file
+          : undefined;
       setModal(null);
       setZip(null);
       setName('');
-      setRouteTo(data.library.kind, data.library.id);
-      notify('导入完成，开始阅读吧');
+      setRouteTo(data.library.kind, data.library.id, retained);
+      notify(updateTarget ? '项目已更新，批注和阅读记录已保留' : '导入完成，开始阅读吧');
     } catch (e) {
+      if (e instanceof HttpError && e.status === 409) await refresh(true);
       handleError(e);
     } finally {
       setBusy(false);
@@ -779,6 +700,7 @@ export default function App() {
     setBusy(true);
     try {
       await api(`/libraries/${manifest.library.id}`, { method: 'DELETE' });
+      setDeletedLibraryId(route.id);
       await removeLibraryCache(user, manifest.library.id);
       setModal(null);
       setRouteTo(route.kind);
@@ -951,7 +873,7 @@ export default function App() {
             </button>
           </div>
         </header>
-        {!route.id ? (
+        {!route.id && (
           <div className="dashboard">
             <section className={`welcome welcome-${route.kind}`} aria-labelledby="collection-title">
               <img
@@ -1151,331 +1073,280 @@ export default function App() {
               )}
             </section>
           </div>
-        ) : (
-          <div className="reader-layout">
-            <aside className={`file-panel ${showTree ? 'open' : ''}`}>
-              <div className="panel-title">
-                <span>
-                  <Layers3 size={15} /> 项目目录
-                </span>
-                <button
-                  className="icon-button mobile-only"
-                  aria-label="关闭目录"
-                  onClick={() => setShowTree(false)}
-                >
-                  <X size={17} />
-                </button>
-              </div>
-              <label className="file-filter">
-                <Search size={14} />
-                <input
-                  aria-label="筛选文件"
-                  placeholder="快速找文件…"
-                  value={fileFilter}
-                  onChange={(e) => setFileFilter(e.target.value)}
-                />
-              </label>
-              {manifest?.library.kind === 'notes' && assetFiles.length > 0 && (
-                <div className="tree-filter-pills">
-                  <button
-                    type="button"
-                    className={`tree-pill ${notesOnly ? 'active' : ''}`}
-                    onClick={() => setNotesOnly(true)}
-                  >
-                    笔记 ({noteFiles.length})
-                  </button>
-                  <button
-                    type="button"
-                    className={`tree-pill ${!notesOnly ? 'active' : ''}`}
-                    onClick={() => setNotesOnly(false)}
-                  >
-                    全部 ({manifest.files.length})
-                  </button>
-                </div>
-              )}
-              <div className="tree">
-                {tree.length ? (
-                  <Tree nodes={tree} active={route.file} onOpen={openFile} />
-                ) : (
-                  <p className="muted tree-empty">{manifest ? '还没有文件' : '正在读取目录…'}</p>
-                )}
-              </div>
-              <div className="file-panel-bottom">
-                <span>
-                  {manifest?.library.kind === 'notes'
-                    ? `${noteFiles.length} 篇笔记${assetFiles.length > 0 ? ` · ${assetFiles.length} 附件` : ''}`
-                    : `${manifest?.files.length || 0} 个文件`}
-                </span>
-                {manifest?.library.kind === 'notes' && (
-                  <button
-                    title="设置云端同步"
-                    aria-label="设置云端同步"
-                    className="icon-button"
-                    disabled={offline}
-                    onClick={() => {
-                      setToken('');
-                      setModal('connect');
-                    }}
-                  >
-                    <Link2 size={16} />
-                  </button>
-                )}
-                <button
-                  className="icon-button"
-                  aria-label="删除项目"
-                  title="删除服务端副本"
-                  disabled={offline}
-                  onClick={() => setModal('delete')}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </aside>
-            {showTree && <div className="tree-scrim" onClick={() => setShowTree(false)} />}
-            <section className="document">
-              <div className="document-toolbar">
-                <button
-                  className="icon-button mobile-only"
-                  aria-label="打开目录"
-                  onClick={() => setShowTree(true)}
-                >
-                  <Menu size={19} />
-                </button>
-                <div className="document-name">
-                  {isMarkdown ? <FileText size={16} /> : <FileCode2 size={16} />}
-                  <span>{route.file?.split('/').pop() || '选择文件开始阅读'}</span>
-                </div>
-                <div className="document-tools">
-                  <button
-                    className={`icon-button ${showSearch ? 'toggled' : ''}`}
-                    aria-label="搜索项目内容"
-                    onClick={() => setShowSearch(!showSearch)}
-                  >
-                    <Search size={17} />
-                  </button>
-                  {!isMarkdown && (
-                    <button
-                      className={`icon-button ${wrap ? 'toggled' : ''}`}
-                      aria-label="自动换行"
-                      aria-pressed={wrap}
-                      title="自动换行"
-                      onClick={() => setWrap(!wrap)}
-                    >
-                      <WrapText size={18} />
-                    </button>
-                  )}
-                  <button
-                    className={`icon-button ${showOutline ? 'toggled' : ''}`}
-                    aria-label="文件大纲"
-                    title="文件大纲"
-                    onClick={() => setShowOutline(!showOutline)}
-                  >
-                    <Layers3 size={17} />
-                  </button>
-                  <button
-                    aria-label={progress || (offlineSaved ? '已保存离线' : '保存离线')}
-                    title={offlineSaved ? '已保存离线' : '保存整个项目供离线阅读'}
-                    className={`button compact ${offlineSaved ? 'saved' : ''}`}
-                    disabled={offline || !!progress || !manifest}
-                    onClick={() => void saveOffline()}
-                  >
-                    {progress ? (
-                      <LoaderCircle className="spin" size={15} />
-                    ) : offlineSaved ? (
-                      <Check size={15} />
-                    ) : (
-                      <ArrowDownToLine size={15} />
-                    )}
-                    <span>{progress || (offlineSaved ? '已保存离线' : '保存离线')}</span>
-                  </button>
-                </div>
-              </div>
-              {showSearch && (
-                <div className="project-search">
-                  <form onSubmit={performSearch}>
-                    <Search size={17} />
-                    <input
-                      autoFocus
-                      aria-label="项目内全文搜索"
-                      placeholder="搜索整个项目的内容…"
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                    />
-                    <button
-                      className="button primary compact"
-                      disabled={searchBusy || !query.trim()}
-                    >
-                      {searchBusy ? '搜索中' : '搜索'}
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label="关闭搜索"
-                      onClick={() => setShowSearch(false)}
-                    >
-                      <X size={17} />
-                    </button>
-                  </form>
-                  {results && (
-                    <div className="search-results">
-                      {results.length ? (
-                        results.map((result, i) => (
-                          <button key={i} onClick={() => openFile(result.path, result.line)}>
-                            <span>
-                              {result.path}
-                              <small>第 {result.line} 行</small>
-                            </span>
-                            <code>{result.snippet}</code>
-                          </button>
-                        ))
-                      ) : (
-                        <p>没有找到匹配内容。</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="document-body">
-                <Suspense fallback={<div className="reader-empty">正在打开阅读器…</div>}>
-                  {fileBusy ? (
-                    <div className="reader-empty">
-                      <LoaderCircle className="spin" size={25} />
-                      <p>正在加载…</p>
-                    </div>
-                  ) : fileError ? (
-                    <div className="reader-empty">
-                      <CloudOff size={32} />
-                      <p>{fileError}</p>
-                      <button className="button secondary" onClick={() => void loadManifest()}>
-                        刷新文件清单
-                      </button>
-                    </div>
-                  ) : !route.file ? (
-                    <div className="reader-empty">
-                      <BookOpen size={38} />
-                      <h3>{manifest?.library.kind === 'notes' ? '暂无笔记' : '选择文件'}</h3>
-                      <p>
-                        {manifest?.library.kind === 'notes'
-                          ? '在电脑的 Obsidian 插件中上传笔记，再在这里阅读。'
-                          : '从目录中选择要查看的文件。'}
-                      </p>
-                      {manifest?.library.kind === 'notes' && (
-                        <button
-                          className="button primary"
-                          disabled={offline}
-                          onClick={() => {
-                            setToken('');
-                            setModal('connect');
-                          }}
-                        >
-                          <Link2 size={16} />
-                          设置云端同步
-                        </button>
-                      )}
-                    </div>
-                  ) : isMarkdown && currentFile?.isText ? (
-                    <MarkdownReader
-                      key={`${user.id}:${manifest!.library.id}:${route.file}`}
-                      theme={theme}
-                      setTheme={setTheme}
-                      line={route.line}
-                      jump={jump}
-                      onOutline={setOutline}
-                      text={text}
-                      path={route.file}
-                      user={user}
-                      manifest={manifest!}
-                      offline={offline}
-                      navigate={openFile}
-                      notify={notify}
-                    />
-                  ) : blobUrl ? (
-                    <div className="image-reader">
-                      <img src={blobUrl} alt={route.file} />
-                    </div>
-                  ) : currentFile?.isText ? (
-                    <CodeReader
-                      key={`${user.id}:${manifest!.library.id}:${route.file}`}
-                      identity={{
-                        userId: user.id,
-                        libraryId: manifest!.library.id,
-                        path: route.file,
-                      }}
-                      notify={notify}
-                      text={text}
-                      path={route.file}
-                      dark={dark}
-                      wrap={wrap}
-                      line={route.line}
-                      jump={jump}
-                      onOutline={setOutline}
-                    />
-                  ) : (
-                    <div className="reader-empty">
-                      <File size={35} />
-                      <h3>这个文件暂不支持预览</h3>
-                      <p>可以保存离线副本，或在电脑上查看。</p>
-                    </div>
-                  )}
-                </Suspense>
-                {showOutline && (
-                  <aside className="outline">
-                    <div className="panel-title">
-                      {isMarkdown ? '本页目录' : '符号速览'}
-                      <button
-                        className="icon-button"
-                        aria-label="关闭大纲"
-                        onClick={() => setShowOutline(false)}
-                      >
-                        <X size={15} />
-                      </button>
-                    </div>
-                    {isMarkdown ? (
-                      outline.length ? (
-                        outline.map((item) => (
-                          <button
-                            key={item.line}
-                            className="heading-item"
-                            style={{ paddingLeft: 12 + ((item.level || 1) - 1) * 10 }}
-                            onClick={() => openFile(route.file!, item.line)}
-                          >
-                            {item.name}
-                          </button>
-                        ))
-                      ) : (
-                        <p className="outline-hint">当前笔记没有标题。</p>
-                      )
-                    ) : (
-                      <>
-                        <p className="outline-hint">按文本识别，仅供快速定位</p>
-                        {outline.map((item) => (
-                          <button key={item.line} onClick={() => openFile(route.file!, item.line)}>
-                            {item.name}
-                            <small>{item.line}</small>
-                          </button>
-                        ))}
-                        {!outline.length && (
-                          <p className="outline-hint">当前文件暂无可识别的符号。</p>
-                        )}
-                      </>
-                    )}
-                  </aside>
-                )}
-              </div>
-              <footer className="document-status">
-                <span>{route.file || '只读空间'}</span>
-                <div>
-                  <span>{currentFile ? formatBytes(currentFile.size) : ''}</span>
-                  <span>UTF-8</span>
-                  <span>
-                    <ShieldCheck size={12} />{' '}
-                    {manifest?.library.kind === 'notes' ? '原文保护' : '只读'}
-                  </span>
-                </div>
-              </footer>
-            </section>
-          </div>
         )}
+        <div className="reader-layout" hidden={!route.id}>
+          <aside className={`file-panel ${showTree ? 'open' : ''}`}>
+            <div className="panel-title">
+              <span>
+                <Layers3 size={15} /> 项目目录
+              </span>
+              <button
+                className="icon-button mobile-only"
+                aria-label="关闭目录"
+                onClick={() => setShowTree(false)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <label className="file-filter">
+              <Search size={14} />
+              <input
+                aria-label="筛选文件"
+                placeholder="快速找文件…"
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
+              />
+            </label>
+            {manifest?.library.kind === 'notes' && assetFiles.length > 0 && (
+              <div className="tree-filter-pills">
+                <button
+                  type="button"
+                  className={`tree-pill ${notesOnly ? 'active' : ''}`}
+                  onClick={() => setNotesOnly(true)}
+                >
+                  笔记 ({noteFiles.length})
+                </button>
+                <button
+                  type="button"
+                  className={`tree-pill ${!notesOnly ? 'active' : ''}`}
+                  onClick={() => setNotesOnly(false)}
+                >
+                  全部 ({manifest.files.length})
+                </button>
+              </div>
+            )}
+            <div className="tree">
+              {tree.length ? (
+                <Tree nodes={tree} active={route.file} onOpen={openFile} />
+              ) : (
+                <p className="muted tree-empty">{manifest ? '还没有文件' : '正在读取目录…'}</p>
+              )}
+            </div>
+            <div className="file-panel-bottom">
+              <span>
+                {manifest?.library.kind === 'notes'
+                  ? `${noteFiles.length} 篇笔记${assetFiles.length > 0 ? ` · ${assetFiles.length} 附件` : ''}`
+                  : `${manifest?.files.length || 0} 个文件`}
+              </span>
+              {manifest?.library.kind === 'notes' && (
+                <button
+                  title="设置云端同步"
+                  aria-label="设置云端同步"
+                  className="icon-button"
+                  disabled={offline}
+                  onClick={() => {
+                    setToken('');
+                    setModal('connect');
+                  }}
+                >
+                  <Link2 size={16} />
+                </button>
+              )}
+              <button
+                className="icon-button"
+                aria-label="更新项目内容"
+                title="用 ZIP 更新当前项目"
+                disabled={offline || !manifest}
+                onClick={() => {
+                  setImportTarget(route.id!);
+                  setModal('import');
+                }}
+              >
+                <UploadCloud size={16} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="删除项目"
+                title="删除服务端副本"
+                disabled={offline}
+                onClick={() => setModal('delete')}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </aside>
+          {showTree && <div className="tree-scrim" onClick={() => setShowTree(false)} />}
+          <section className="document">
+            <div className="document-toolbar">
+              <button
+                className="icon-button mobile-only"
+                aria-label="打开目录"
+                onClick={() => setShowTree(true)}
+              >
+                <Menu size={19} />
+              </button>
+              <div className="document-name">
+                {isMarkdown ? <FileText size={16} /> : <FileCode2 size={16} />}
+                <span>{route.file?.split('/').pop() || '选择文件开始阅读'}</span>
+              </div>
+              <div className="document-tools">
+                <button
+                  className={`icon-button ${showSearch ? 'toggled' : ''}`}
+                  aria-label="搜索项目内容"
+                  onClick={() => setShowSearch(!showSearch)}
+                >
+                  <Search size={17} />
+                </button>
+                {!isMarkdown && (
+                  <button
+                    className={`icon-button ${wrap ? 'toggled' : ''}`}
+                    aria-label="自动换行"
+                    aria-pressed={wrap}
+                    title="自动换行"
+                    onClick={() => setWrap(!wrap)}
+                  >
+                    <WrapText size={18} />
+                  </button>
+                )}
+                <button
+                  className={`icon-button ${showOutline ? 'toggled' : ''}`}
+                  aria-label="文件大纲"
+                  title="文件大纲"
+                  onClick={() => setShowOutline(!showOutline)}
+                >
+                  <Layers3 size={17} />
+                </button>
+                <button
+                  aria-label={progress || (offlineSaved ? '已保存离线' : '保存离线')}
+                  title={offlineSaved ? '已保存离线' : '保存整个项目供离线阅读'}
+                  className={`button compact ${offlineSaved ? 'saved' : ''}`}
+                  disabled={offline || !!progress || !manifest}
+                  onClick={() => void saveOffline()}
+                >
+                  {progress ? (
+                    <LoaderCircle className="spin" size={15} />
+                  ) : offlineSaved ? (
+                    <Check size={15} />
+                  ) : (
+                    <ArrowDownToLine size={15} />
+                  )}
+                  <span>{progress || (offlineSaved ? '已保存离线' : '保存离线')}</span>
+                </button>
+              </div>
+            </div>
+            {showSearch && (
+              <div className="project-search">
+                <form onSubmit={performSearch}>
+                  <Search size={17} />
+                  <input
+                    autoFocus
+                    aria-label="项目内全文搜索"
+                    placeholder="搜索整个项目的内容…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <button className="button primary compact" disabled={searchBusy || !query.trim()}>
+                    {searchBusy ? '搜索中' : '搜索'}
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="关闭搜索"
+                    onClick={() => setShowSearch(false)}
+                  >
+                    <X size={17} />
+                  </button>
+                </form>
+                {results && (
+                  <div className="search-results">
+                    {results.length ? (
+                      results.map((result, i) => (
+                        <button key={i} onClick={() => openFile(result.path, result.line)}>
+                          <span>
+                            {result.path}
+                            <small>第 {result.line} 行</small>
+                          </span>
+                          <code>{result.snippet}</code>
+                        </button>
+                      ))
+                    ) : (
+                      <p>没有找到匹配内容。</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="document-body">
+              <ReaderWorkspace
+                key={user.id}
+                user={user}
+                manifest={manifest}
+                libraryId={route.id}
+                deletedLibraryId={deletedLibraryId}
+                path={route.file}
+                line={route.line}
+                heading={route.heading}
+                jump={jump}
+                theme={theme}
+                setTheme={setTheme}
+                wrap={wrap}
+                offline={offline}
+                navigate={setRouteTo}
+                notify={notify}
+                onOutline={setOutline}
+                handleError={handleError}
+                connect={() => {
+                  setToken('');
+                  setModal('connect');
+                }}
+              />
+              {showOutline && (
+                <aside className="outline">
+                  <div className="panel-title">
+                    {isMarkdown ? '本页目录' : '符号速览'}
+                    <button
+                      className="icon-button"
+                      aria-label="关闭大纲"
+                      onClick={() => setShowOutline(false)}
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                  {isMarkdown ? (
+                    outline.length ? (
+                      outline.map((item) => (
+                        <button
+                          key={item.line}
+                          className="heading-item"
+                          style={{ paddingLeft: 12 + ((item.level || 1) - 1) * 10 }}
+                          onClick={() => openFile(route.file!, item.line)}
+                        >
+                          {item.name}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="outline-hint">当前笔记没有标题。</p>
+                    )
+                  ) : (
+                    <>
+                      <p className="outline-hint">按文本识别，仅供快速定位</p>
+                      {outline.map((item) => (
+                        <button key={item.line} onClick={() => openFile(route.file!, item.line)}>
+                          {item.name}
+                          <small>{item.line}</small>
+                        </button>
+                      ))}
+                      {!outline.length && (
+                        <p className="outline-hint">当前文件暂无可识别的符号。</p>
+                      )}
+                    </>
+                  )}
+                </aside>
+              )}
+            </div>
+            <footer className="document-status">
+              <span>{route.file || '只读空间'}</span>
+              <div>
+                <span>{currentFile ? formatBytes(currentFile.size) : ''}</span>
+                <span>UTF-8</span>
+                <span>
+                  <ShieldCheck size={12} />{' '}
+                  {manifest?.library.kind === 'notes' ? '原文保护' : '只读'}
+                </span>
+              </div>
+            </footer>
+          </section>
+        </div>
       </main>
       <nav className="mobile-nav">
         <button
@@ -1563,6 +1434,33 @@ export default function App() {
         >
           <form onSubmit={doImport}>
             <label className="field">
+              导入到
+              <select
+                aria-label="导入目标"
+                value={importTarget}
+                onChange={(event) => setImportTarget(event.target.value)}
+              >
+                <option value="auto">自动匹配同名项目</option>
+                <option value="new">新建项目</option>
+                {libraries
+                  .filter((lib) => lib.kind === route.kind)
+                  .map((lib) => (
+                    <option key={lib.id} value={lib.id}>
+                      {lib.name} · {lib.fileCount} 个文件 · {relativeDate(lib.updatedAt)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {ambiguousImport ? (
+              <p role="alert">存在多个同名项目，请选择要更新的项目。</p>
+            ) : (
+              updateTarget && (
+                <p className="modal-intro">
+                  更新「{updateTarget.name}」。ZIP 将替换项目文件，批注和编辑版保留。
+                </p>
+              )
+            )}
+            <label className="field">
               名称
               <input
                 value={name}
@@ -1593,9 +1491,9 @@ export default function App() {
               ZIP 最多 24 MB，解压后最多 64 MB / 4000 个文件。自动略过 .git、node_modules 和
               Obsidian 配置目录。
             </p>
-            <button className="button primary wide" disabled={busy || !zip}>
+            <button className="button primary wide" disabled={busy || !zip || ambiguousImport}>
               {busy ? <LoaderCircle className="spin" size={17} /> : <UploadCloud size={17} />}{' '}
-              {busy ? '正在导入…' : '导入并开始阅读'}
+              {busy ? '正在处理…' : updateTarget ? '更新项目' : '导入并开始阅读'}
             </button>
           </form>
         </Modal>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { EditorView } from '@codemirror/view';
 import { Compartment, EditorState, StateEffect } from '@codemirror/state';
 import { basicSetup } from 'codemirror';
@@ -14,6 +14,7 @@ import {
 } from './readerState';
 
 export default function CodeReader({
+  active = true,
   text,
   path,
   identity,
@@ -24,6 +25,7 @@ export default function CodeReader({
   jump,
   onOutline,
 }: {
+  active?: boolean;
   text: string;
   path: string;
   identity: ReaderIdentity;
@@ -34,6 +36,28 @@ export default function CodeReader({
   jump: number;
   onOutline: (items: OutlineItem[]) => void;
 }) {
+  const readSize = () => {
+    try {
+      return Math.min(
+        24,
+        Math.max(10, Number(localStorage.getItem('codesip:code-font-size')) || 14),
+      );
+    } catch {
+      return 14;
+    }
+  };
+  const [fontSize, setFontSize] = useState(readSize);
+  const resize = (size: number) => {
+    setFontSize(size);
+    try {
+      localStorage.setItem('codesip:code-font-size', String(size));
+    } catch {
+      /* Apply for this session. */
+    }
+  };
+  useEffect(() => {
+    if (active) setFontSize(readSize());
+  }, [active]);
   const root = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const compartments = useRef({ wrap: new Compartment(), theme: new Compartment() });
@@ -71,7 +95,7 @@ export default function CodeReader({
           }),
           EditorView.theme({
             '&': {
-              fontSize: '13.5px',
+              fontSize: 'var(--code-font-size)',
               height: '100%',
               backgroundColor: 'var(--bg-surface)',
               color: 'var(--text-primary)',
@@ -123,8 +147,20 @@ export default function CodeReader({
     });
   }, [dark, wrap, text]);
   useEffect(() => {
-    if (line !== undefined) scrollToLine(line);
-  }, [line, jump, text]);
+    if (active) viewRef.current?.requestMeasure();
+  }, [active, fontSize]);
+  const lastJump = useRef<{ line: number; jump: number; text: string } | null>(null);
+  useEffect(() => {
+    if (!active || line === undefined) return;
+    if (
+      lastJump.current?.line === line &&
+      lastJump.current.jump === jump &&
+      lastJump.current.text === text
+    )
+      return;
+    scrollToLine(line);
+    lastJump.current = { line, jump, text };
+  }, [active, line, jump, text]);
   useEffect(() => {
     const items: OutlineItem[] = [];
     text.split('\n').forEach((value, index) => {
@@ -136,9 +172,38 @@ export default function CodeReader({
     onOutline(items.slice(0, 150));
   }, [text, onOutline]);
   return (
-    <div className="code-reader-container">
+    <div
+      className="code-reader-container"
+      style={{ '--code-font-size': `${fontSize}px` } as CSSProperties}
+    >
       <div className="code-reader-toolbar">
-        <div className="code-reader-status">当前行：L{activeLine}</div>
+        <div className="code-reader-status">L{activeLine}</div>
+        <div className="code-zoom" role="group" aria-label="代码字号">
+          <button
+            type="button"
+            aria-label="缩小代码"
+            disabled={fontSize <= 10}
+            onClick={() => resize(fontSize - 1)}
+          >
+            A−
+          </button>
+          <button
+            type="button"
+            aria-label="重置代码字号"
+            title="恢复默认字号"
+            onClick={() => resize(14)}
+          >
+            {Math.round((fontSize / 14) * 100)}%
+          </button>
+          <button
+            type="button"
+            aria-label="放大代码"
+            disabled={fontSize >= 24}
+            onClick={() => resize(fontSize + 1)}
+          >
+            A+
+          </button>
+        </div>
         <button
           type="button"
           className="code-annotate-btn"
@@ -155,7 +220,7 @@ export default function CodeReader({
         identity={identity}
         notify={notify}
         code
-        target={target}
+        target={active ? target : null}
         setTarget={(next) => {
           if (next) scrollToLine(next.line);
           setTarget(next);

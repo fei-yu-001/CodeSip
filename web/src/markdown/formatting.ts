@@ -8,6 +8,7 @@ export const readerSchema: Options = {
   strip: [...defaultSchema.strip!, 'style', 'iframe', 'object', 'embed', 'template', 'form'],
   attributes: {
     ...defaultSchema.attributes,
+    img: [...defaultSchema.attributes!.img, 'width', 'height'],
     code: [['className', /^language-./, 'math-inline', 'math-display']],
     aside: [['className', 'markdown-callout'], 'dataCallout'],
     details: [['className', 'markdown-callout'], 'dataCallout', 'open'],

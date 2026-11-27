@@ -142,3 +142,30 @@ test('formatted HTML cannot execute scripts, inject styles, load frames or enabl
   assert.ok(!JSON.stringify(parsed).includes('body{display:none}'));
   assert.ok(all.some((el) => el.properties.id === 'user-content-location'));
 });
+
+test('Obsidian highlights, comments, image sizes and line breaks preserve code and source lines', () => {
+  const source =
+    '# Title\n\n第一行\n第二行 ==重点 **加粗**==\n\n' +
+    '%% hidden\n\n# hidden heading\n\n**secret** %%\n\n' +
+    '## Visible\n\n![[photo.png|240x120]]\n\n' +
+    '`==literal== %%code%%`\n\n```ts\nconst example = "%%literal%% ==plain==";\n```\n\n' +
+    '\\==escaped==\n\nUnclosed ==marker\n';
+  const parsed = parseMarkdown(source);
+  const all = elements(parsed.chunks.flatMap((chunk) => chunk.tree.children));
+  assert.equal(all.filter((el) => el.tagName === 'mark').length, 1);
+  const mark = all.find((el) => el.tagName === 'mark')!;
+  assert.ok(elements(mark.children).some((el) => el.tagName === 'strong'));
+  assert.ok(all.some((el) => el.tagName === 'br'));
+  assert.ok(!JSON.stringify(parsed).includes('secret'));
+  assert.deepEqual(
+    parsed.outline.map((item) => item.name),
+    ['Title', 'Visible'],
+  );
+  assert.equal(parsed.outline[1].line, source.split('\n').indexOf('## Visible') + 1);
+  const image = all.find((el) => el.tagName === 'img')!;
+  assert.equal(image.properties.width, 240);
+  assert.equal(image.properties.height, 120);
+  assert.ok(JSON.stringify(parsed).includes('%%literal%% ==plain=='));
+  assert.ok(JSON.stringify(parsed).includes('==literal== %%code%%'));
+  assert.ok(JSON.stringify(parsed).includes('Unclosed ==marker'));
+});

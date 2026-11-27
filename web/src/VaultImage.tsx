@@ -5,6 +5,8 @@ import { fileBlob, onPrivateDataCleared } from './api';
 export interface VaultImageProps {
   src?: string;
   alt?: string;
+  width?: number;
+  height?: number;
   user: User;
   manifest: Manifest;
   path: string;
@@ -205,7 +207,11 @@ export function createVaultImageLoader(options: ImageLoaderOptions = {}) {
   const drain = () => {
     while (activeCount < maxConcurrency && queue.length > 0) {
       const task = queue.shift()!;
-      if (task.status !== 'queued' || task.subscribers.size === 0 || task.generation !== generation) {
+      if (
+        task.status !== 'queued' ||
+        task.subscribers.size === 0 ||
+        task.generation !== generation
+      ) {
         continue;
       }
       task.status = 'running';
@@ -394,7 +400,16 @@ function observeProximity(
   };
 }
 
-export function VaultImage({ src, alt, user, manifest, path, offline }: VaultImageProps) {
+export function VaultImage({
+  src,
+  alt,
+  width,
+  height,
+  user,
+  manifest,
+  path,
+  offline,
+}: VaultImageProps) {
   const resolution = useMemo(() => {
     if (!src) return { status: 'empty' as const };
     if (/^https?:\/\//.test(src)) {
@@ -408,9 +423,7 @@ export function VaultImage({ src, alt, user, manifest, path, offline }: VaultIma
   }, [src, path, manifest]);
 
   const file = resolution.status === 'ready' ? resolution.file : undefined;
-  const targetKey = file
-    ? buildImageCacheKey(user.id, manifest.library.id, file.hash)
-    : undefined;
+  const targetKey = file ? buildImageCacheKey(user.id, manifest.library.id, file.hash) : undefined;
   const loadKey = targetKey ? `${targetKey}\0${offline ? '1' : '0'}` : '';
 
   // Bind state explicitly to loadKey so changing props never briefly reuses prior image flags.
@@ -484,7 +497,7 @@ export function VaultImage({ src, alt, user, manifest, path, offline }: VaultIma
   }, [targetKey, loadKey, libraryId, offline, inView]);
 
   return url ? (
-    <img src={url} alt={alt || ''} loading="lazy" />
+    <img src={url} alt={alt || ''} width={width} height={height} loading="lazy" />
   ) : (
     <span ref={fallbackRef} className="image-fallback">
       {error || '加载图片…'}

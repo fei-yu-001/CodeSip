@@ -52,6 +52,7 @@ export function resolveFile(source: string, target: string, paths: string[]): st
   return matches.length === 1 ? matches[0] : undefined;
 }
 export default function MarkdownReader({
+  active = true,
   text,
   path,
   user,
@@ -62,19 +63,22 @@ export default function MarkdownReader({
   theme,
   setTheme,
   line,
+  heading,
   jump,
   onOutline,
 }: {
+  active?: boolean;
   text: string;
   path: string;
   user: User;
   manifest: Manifest;
   offline: boolean;
-  navigate: (path: string) => void;
+  navigate: (path: string, line?: number, heading?: string) => void;
   notify: (message: string) => void;
   theme: ReaderTheme;
   setTheme: (theme: ReaderTheme) => void;
   line?: number;
+  heading?: string;
   jump: number;
   onOutline: (items: OutlineItem[]) => void;
 }) {
@@ -162,23 +166,30 @@ export default function MarkdownReader({
     const article = articleRef.current;
     if (article) return trackReadingPosition(article, positionKey, line === undefined);
   }, [displayText, positionKey, line === undefined]);
+  const headingLine = heading
+    ? parsed.outline.find(
+        (item) => item.name.trim().toLocaleLowerCase() === heading.trim().toLocaleLowerCase(),
+      )?.line
+    : undefined;
+  const targetLine = line ?? headingLine;
   const lastJump = useRef<{ text: string; line: number; jump: number } | null>(null);
   useEffect(() => {
     const article = articleRef.current;
-    if (!article || line === undefined || !parsed.chunks.length) return;
+    if (!active || !article || targetLine === undefined || !parsed.chunks.length) return;
     if (
       lastJump.current?.text === displayText &&
-      lastJump.current.line === line &&
+      lastJump.current.line === targetLine &&
       lastJump.current.jump === jump
     )
       return;
     // A search or outline click can arrive before its block has streamed in.
-    if (!parsed.done && parsed.chunks.at(-1)!.endLine < line) return;
+    if (!parsed.done && parsed.chunks.at(-1)!.endLine < targetLine) return;
     setCodeOnly(false);
     const frame = requestAnimationFrame(() => {
       const blocks = Array.from(article.querySelectorAll<HTMLElement>('[data-source-line]'));
       const block =
-        blocks.filter((element) => Number(element.dataset.sourceLine) <= line).at(-1) || blocks[0];
+        blocks.filter((element) => Number(element.dataset.sourceLine) <= targetLine).at(-1) ||
+        blocks[0];
       if (block) {
         // Outline/search targets may be inside nested collapsed sections.
         for (
@@ -190,11 +201,11 @@ export default function MarkdownReader({
         }
         article.scrollTop +=
           block.getBoundingClientRect().top - article.getBoundingClientRect().top - 16;
-        lastJump.current = { text: displayText, line, jump };
+        lastJump.current = { text: displayText, line: targetLine, jump };
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [line, jump, displayText, parsed.chunks.length, parsed.done]);
+  }, [active, targetLine, jump, displayText, parsed.chunks.length, parsed.done]);
 
   // Selection and toolbar state must not recreate the selected DOM nodes.
   const components = useMemo<Partial<Components>>(
@@ -216,8 +227,15 @@ export default function MarkdownReader({
               manifest.files.map((f) => f.path),
             );
             if (target) {
-              navigate(target);
-              if (href?.includes('#')) notify('已打开目标笔记，可通过目录定位章节');
+              let heading: string | undefined;
+              try {
+                heading = href?.includes('#')
+                  ? decodeURIComponent(href.slice(href.indexOf('#') + 1))
+                  : undefined;
+              } catch {
+                /* Open the file even if the fragment is malformed. */
+              }
+              navigate(target, undefined, heading);
             } else notify('未找到链接目标，请确认该笔记已同步且名称唯一');
           }}
           target={/^https?:\/\//.test(href || '') ? '_blank' : undefined}
@@ -226,10 +244,12 @@ export default function MarkdownReader({
           {children}
         </a>
       ),
-      img: ({ src, alt }) => (
+      img: ({ src, alt, width, height }) => (
         <VaultImage
           src={typeof src === 'string' ? src : undefined}
           alt={alt}
+          width={width ? Number(width) : undefined}
+          height={height ? Number(height) : undefined}
           user={user}
           manifest={manifest}
           path={path}
@@ -319,10 +339,10 @@ export default function MarkdownReader({
         )}
         <AnnotationPanel
           identity={identity}
-          target={target}
+          target={active ? target : null}
           setTarget={setTarget}
           notify={notify}
-          listOpen={listOpen}
+          listOpen={active && listOpen}
           closeList={() => setListOpen(false)}
         />
       </article>
@@ -360,7 +380,8 @@ export default function MarkdownReader({
           <span>阅读设置</span>
         </button>
       </nav>
-      {settingsOpen &&
+      {active &&
+        settingsOpen &&
         createPortal(
           <Modal
             title="阅读设置"
@@ -456,7 +477,7 @@ export default function MarkdownReader({
           document.body,
         )}
       <DocumentEditor
-        open={editorOpen}
+        open={active && editorOpen}
         close={() => setEditorOpen(false)}
         document={documentCopy}
         path={path}

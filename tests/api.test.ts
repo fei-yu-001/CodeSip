@@ -231,3 +231,92 @@ test('initial setup accepts exactly one concurrent creator', async (t) => {
   assert.deepEqual(requests.map((r) => r.statusCode).sort(), [200, 409]);
   assert.equal(store.needsSetup, false);
 });
+
+test('ZIP updates retain library identity and annotations, remove absent files, and reject stale or foreign targets', async (t) => {
+  const { app, store, headers, user } = await fixture();
+  t.after(() => app.close());
+  const upload = (query: string, files: Record<string, string>) => {
+    const boundary = 'codesip-update-fixture';
+    const bytes = Buffer.from(
+      zipSync(
+        Object.fromEntries(Object.entries(files).map(([name, text]) => [name, strToU8(text)])),
+      ),
+    );
+    return app.inject({
+      method: 'POST',
+      url: `/api/import?kind=notes&name=Updating${query}`,
+      headers: { ...headers, 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload: Buffer.concat([
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="updating.zip"\r\nContent-Type: application/zip\r\n\r\n`,
+        ),
+        bytes,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]),
+    });
+  };
+  const first = await upload('', { 'note.md': '# Before', 'removed.md': 'Old file' });
+  assert.equal(first.statusCode, 200, first.body);
+  const original = first.json().library;
+  const annotation = await app.inject({
+    method: 'PUT',
+    url: `/api/libraries/${original.id}/annotations/update-note`,
+    headers,
+    payload: {
+      path: 'note.md',
+      line: 1,
+      snippet: 'Before',
+      note: 'Keep this annotation',
+      expectedUpdatedAt: null,
+    },
+  });
+  assert.equal(annotation.statusCode, 200, annotation.body);
+  const hash = store
+    .manifest(user.id, original.id)
+    .files.find((file) => file.path === 'note.md')!.hash;
+  const copy = await app.inject({
+    method: 'PUT',
+    url: `/api/libraries/${original.id}/document-copy`,
+    headers,
+    payload: { path: 'note.md', content: '# My edit', baseHash: hash, expectedUpdatedAt: null },
+  });
+  assert.equal(copy.statusCode, 200, copy.body);
+  const target = `&libraryId=${original.id}&baseRevision=${original.revision}`;
+  const update = await upload(target, { 'note.md': '# After', 'added.md': 'New file' });
+  assert.equal(update.statusCode, 200, update.body);
+  assert.equal(update.json().library.id, original.id);
+  assert.equal(update.json().library.revision, original.revision + 1);
+  assert.equal(store.libraries(user.id).length, 1);
+  assert.deepEqual(
+    store.manifest(user.id, original.id).files.map((file) => file.path),
+    ['added.md', 'note.md'],
+  );
+  assert.equal(
+    Buffer.from(store.file(user.id, original.id, 'note.md').content).toString(),
+    '# After',
+  );
+  const annotations = (
+    await app.inject({ url: `/api/libraries/${original.id}/annotations?path=note.md`, headers })
+  ).json();
+  const savedCopy = (
+    await app.inject({ url: `/api/libraries/${original.id}/document-copy?path=note.md`, headers })
+  ).json();
+  assert.equal(annotations.annotations[0].note, 'Keep this annotation');
+  assert.equal(savedCopy.copy.content, '# My edit');
+  assert.equal((await upload(target, { 'note.md': '# Stale' })).statusCode, 409);
+  assert.equal(
+    Buffer.from(store.file(user.id, original.id, 'note.md').content).toString(),
+    '# After',
+  );
+  assert.equal(
+    (await upload(`&libraryId=${original.id}`, { 'note.md': '# Invalid' })).statusCode,
+    400,
+  );
+  const foreign = await store.createUser('another-reader', 'another-strong-password');
+  const foreignLibrary = store.createLibrary(foreign.id, 'Private', 'notes');
+  assert.equal(
+    (await upload(`&libraryId=${foreignLibrary.id}&baseRevision=0`, { 'note.md': '# Other' }))
+      .statusCode,
+    404,
+  );
+});

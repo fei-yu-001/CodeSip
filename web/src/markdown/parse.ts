@@ -6,6 +6,7 @@ import remarkFrontmatter from 'remark-frontmatter';
 import rehypeRaw from 'rehype-raw';
 import rehypeKatex from 'rehype-katex';
 import { remarkCallouts } from './callouts';
+import { remarkObsidian, stripObsidianComments } from './obsidian';
 import {
   rehypeSanitize,
   readerSchema,
@@ -32,6 +33,7 @@ function wikiLinks() {
           visit(child);
           return [child];
         }
+        if (!child.value.includes('[[')) return [child];
         const pieces: MdastContent[] = [];
         const rx = /(!?)\[\[([^\]]+)\]\]/g;
         let start = 0;
@@ -40,9 +42,23 @@ function wikiLinks() {
           if (match.index > start)
             pieces.push({ type: 'text', value: child.value.slice(start, match.index) });
           const [target, label] = match[2].split('|');
+          const dimensions = match[1] && /^(\d+)(?:x(\d+))?$/.exec(label || '');
+          const size = dimensions
+            ? {
+                width: Math.min(4096, Math.max(1, Number(dimensions[1]))),
+                ...(dimensions[2]
+                  ? { height: Math.min(4096, Math.max(1, Number(dimensions[2]))) }
+                  : {}),
+              }
+            : undefined;
           pieces.push(
             match[1]
-              ? { type: 'image', url: encodeURI(target), alt: label || target }
+              ? {
+                  type: 'image',
+                  url: encodeURI(target),
+                  alt: dimensions ? target : label || target,
+                  ...(size ? { data: { hProperties: size } } : {}),
+                }
               : {
                   type: 'link',
                   url: encodeURI(target),
@@ -67,6 +83,7 @@ const processor = unified()
   .use(remarkMath)
   .use(wikiLinks)
   .use(remarkCallouts)
+  .use(remarkObsidian)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(preserveLiteralTags)
   .use(rehypeRaw)
@@ -85,7 +102,8 @@ function nodeText(node: RootContent): string {
 }
 
 export function parseMarkdown(text: string): MarkdownDocument {
-  const tree = processor.runSync(processor.parse(text)) as Root;
+  const source = stripObsidianComments(text);
+  const tree = processor.runSync(processor.parse(source), { value: source }) as Root;
   const outline: MarkdownDocument['outline'] = [];
   const chunks: MarkdownChunk[] = [];
   // Bound ordinary commits by AST work, not source bytes (highlighted code expands greatly).

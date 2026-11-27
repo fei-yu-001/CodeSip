@@ -42,3 +42,14 @@
 .markdown-content .katex-error {
   overflow-wrap: anywhere;
 }
+
+.markdown-content mark {
+  color: inherit;
+  background: color-mix(in srgb, #efc64b 45%, transparent);
+  border-radius: 2px;
+  padding: 0 0.1em;
+}
+.markdown-content img[width] {
+  max-width: 100%;
+  object-fit: contain;
+}

@@ -71,32 +71,44 @@ test('long Markdown streams once, remains interactive and navigates to not-yet-m
   await page.goto(`/#notes/${id}?file=long.md`);
   await expect(page.getByRole('heading', { name: '长文线程测试', exact: true })).toBeVisible();
   // There is useful content and operable UI before the whole document mounts.
-  await expect(page.locator('.markdown-content')).toHaveAttribute('data-render-complete', 'false');
+  await expect(page.locator('.reader-panel:not([hidden]) .markdown-content')).toHaveAttribute(
+    'data-render-complete',
+    'false',
+  );
   await page.getByRole('button', { name: '文件大纲', exact: true }).click();
   await expect(page.locator('.outline .heading-item')).toHaveCount(161);
   await page.locator('.outline').getByRole('button', { name: '分节 155', exact: true }).click();
   await expect(page.getByRole('heading', { name: '分节 155', exact: true })).toBeInViewport({
     timeout: 15000,
   });
-  await expect(page.locator('.markdown-content')).toHaveAttribute('data-render-complete', 'true', {
-    timeout: 15000,
-  });
+  await expect(page.locator('.reader-panel:not([hidden]) .markdown-content')).toHaveAttribute(
+    'data-render-complete',
+    'true',
+    {
+      timeout: 15000,
+    },
+  );
   await expect(page.getByRole('link', { name: '全局引用' })).toHaveAttribute(
     'href',
     'https://example.com/target',
   );
   expect(await page.evaluate(() => (window as any).readerParses)).toBe(1);
-  const article = page.locator('article.markdown');
+  const article = page.locator('.reader-panel:not([hidden]) article.markdown');
   await article.evaluate((element) => {
     element.scrollTop = 18000;
   });
   await page.goto(`/#notes/${id}?file=small.md`);
   await expect(page.getByRole('heading', { name: '小笔记' })).toBeVisible();
   await page.goto(`/#notes/${id}?file=long.md`);
-  await expect(page.locator('.markdown-content')).toHaveAttribute('data-render-complete', 'true', {
-    timeout: 15000,
-  });
+  await expect(page.locator('.reader-panel:not([hidden]) .markdown-content')).toHaveAttribute(
+    'data-render-complete',
+    'true',
+    {
+      timeout: 15000,
+    },
+  );
   await expect.poll(() => article.evaluate((element) => element.scrollTop)).toBeGreaterThan(17900);
+  expect(await page.evaluate(() => (window as any).readerParses)).toBe(2);
   expect(errors).toEqual([]);
 });
 
@@ -131,11 +143,15 @@ test('offscreen images wait for the viewport, duplicate images share a verified 
     'src',
     /^blob:/,
   );
-  await expect(page.locator('.markdown-content')).toHaveAttribute('data-render-complete', 'true', {
-    timeout: 15000,
-  });
+  await expect(page.locator('.reader-panel:not([hidden]) .markdown-content')).toHaveAttribute(
+    'data-render-complete',
+    'true',
+    {
+      timeout: 15000,
+    },
+  );
   expect(requested).toEqual(['near.png']);
-  await page.locator('article.markdown').evaluate((element) => {
+  await page.locator('.reader-panel:not([hidden]) article.markdown').evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
   await expect(page.getByRole('img', { name: 'far', exact: true })).toHaveAttribute(

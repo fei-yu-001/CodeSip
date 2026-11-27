@@ -464,13 +464,41 @@ fn dispatch(
                 q("name")
             };
             let tx = db::transaction(db)?;
-            let lib = db::create_library(
-                &tx,
-                uid,
-                &json!({"name":name,"kind":if q("kind").is_empty(){"code"}else{q("kind")}}),
-            )?;
+            let kind = if q("kind").is_empty() {
+                "code"
+            } else {
+                q("kind")
+            };
+            let (lib, expected, deleted) = if q("libraryId").is_empty() {
+                (
+                    db::create_library(&tx, uid, &json!({"name":name,"kind":kind}))?,
+                    0,
+                    Vec::new(),
+                )
+            } else {
+                let lib = db::library(&tx, uid, q("libraryId"))?;
+                if lib["kind"].as_str() != Some(kind) {
+                    return Err(ApiError::new(400, "更新目标的项目类型不匹配"));
+                }
+                let expected = q("baseRevision")
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|value| *value >= 0)
+                    .ok_or_else(|| ApiError::new(400, "更新项目需要有效的版本号"))?;
+                let incoming: std::collections::HashSet<&str> =
+                    files.iter().map(|file| file.path.as_str()).collect();
+                let paths: Vec<String> = tx
+                    .prepare("SELECT path FROM files WHERE library_id=?")?
+                    .query_map([q("libraryId")], |row| row.get(0))?
+                    .collect::<rusqlite::Result<_>>()?;
+                let deleted = paths
+                    .into_iter()
+                    .filter(|path| !incoming.contains(path.as_str()))
+                    .collect();
+                (lib, expected, deleted)
+            };
             let id = lib["id"].as_str().unwrap();
-            db::put_inner(&tx, id, &files, &[], 0)?;
+            db::put_inner(&tx, id, &files, &deleted, expected)?;
             let lib = db::library(&tx, uid, id)?;
             tx.commit()?;
             return Output::json(json!({"library":lib}));

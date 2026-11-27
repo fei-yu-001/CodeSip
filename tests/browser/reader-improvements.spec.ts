@@ -59,7 +59,9 @@ async function library(
 async function open(page: Page, lib: { kind: string; id: string }, path: string) {
   await page.goto(`/#${lib.kind}/${lib.id}?file=${encodeURIComponent(path)}`);
   await expect(
-    page.locator(path.endsWith('.md') ? '.markdown-content' : '.cm-content'),
+    page
+      .locator('.reader-panel:not([hidden])')
+      .locator(path.endsWith('.md') ? '.markdown-content' : '.cm-content'),
   ).toBeVisible();
 }
 const longNote =
@@ -83,8 +85,10 @@ test('annotations persist offline, edit and delete, and save errors keep the dra
   await syncNow(page);
   await expect(page.locator('.annotation-pill.status-synced')).toContainText('刷新后仍然保留');
   await page.reload();
-  await expect(page.locator('.annotation-pill')).toContainText('刷新后仍然保留');
-  await page.locator('.annotation-pill').click();
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toContainText(
+    '刷新后仍然保留',
+  );
+  await page.locator('.reader-panel:not([hidden]) .annotation-pill').click();
   await page.getByRole('textbox', { name: '批注内容' }).fill('修改后的批注');
   await page.getByRole('button', { name: '保存批注', exact: true }).click();
   await syncNow(page);
@@ -94,18 +98,20 @@ test('annotations persist offline, edit and delete, and save errors keep the dra
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
   await context.setOffline(true);
   await page.reload();
-  await expect(page.locator('.annotation-pill')).toContainText('修改后的批注');
-  await page.locator('.annotation-pill').click();
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toContainText(
+    '修改后的批注',
+  );
+  await page.locator('.reader-panel:not([hidden]) .annotation-pill').click();
   await page.getByRole('button', { name: '删除批注', exact: true }).click();
   await expect(page.locator('.annotation-pill.status-deleting')).toContainText('待删除');
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await page.reload();
-  await expect(page.locator('.markdown-content')).toBeVisible();
+  await expect(page.locator('.reader-panel:not([hidden]) .markdown-content')).toBeVisible();
   await expect(page.locator('.annotation-pill.status-deleting')).toContainText('修改后的批注');
   await context.setOffline(false);
   await expect(page.locator('.annotation-pill.status-deleting')).toHaveCount(1);
   await syncNow(page);
-  await expect(page.locator('.annotation-pill')).toHaveCount(0);
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toHaveCount(0);
   expect(
     (await (await page.request.get(`/api/libraries/${lib.id}/annotations?path=note.md`)).json())
       .annotations,
@@ -123,7 +129,7 @@ test('annotations persist offline, edit and delete, and save errors keep the dra
   await page.getByRole('button', { name: '保存批注', exact: true }).click();
   await expect(page.locator('.toast')).toContainText('未能保存');
   await expect(page.getByRole('textbox', { name: '批注内容' })).toHaveValue('不能丢失的草稿');
-  await expect(page.locator('.annotation-pill')).toHaveCount(0);
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toHaveCount(0);
 });
 
 test('same-name files isolate annotations and legacy records require explicit import', async ({
@@ -135,12 +141,14 @@ test('same-name files isolate annotations and legacy records require explicit im
   await page.getByRole('button', { name: '添加标注', exact: true }).click();
   await page.getByRole('textbox', { name: '批注内容' }).fill('只属于项目 A');
   await page.getByRole('button', { name: '保存批注', exact: true }).click();
-  await expect(page.locator('.annotation-pill')).toContainText('只属于项目 A');
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toContainText(
+    '只属于项目 A',
+  );
   // Closing a sheet finishes an asynchronous same-URL history traversal.
   // Wait for that transition before issuing an external browser navigation.
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await open(page, b, 'shared.ts');
-  await expect(page.locator('.annotation-pill')).toHaveCount(0);
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toHaveCount(0);
   await page.evaluate(() =>
     localStorage.setItem(
       'codesip:annotations:shared.ts',
@@ -151,18 +159,22 @@ test('same-name files isolate annotations and legacy records require explicit im
   );
   await page.reload();
   await expect(page.getByRole('button', { name: '查看旧版批注（1）' })).toBeVisible();
-  await expect(page.locator('.annotation-pill')).toHaveCount(0);
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toHaveCount(0);
   await page.getByRole('button', { name: '查看旧版批注（1）' }).click();
   await page.getByRole('button', { name: '导入此条' }).click();
   await page.getByRole('button', { name: '关闭批注' }).click();
-  await expect(page.locator('.annotation-pill')).toContainText('旧版记录');
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toContainText(
+    '旧版记录',
+  );
   expect(
     await page.evaluate(() => localStorage.getItem('codesip:annotations:shared.ts')),
   ).toContain('旧版记录');
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await open(page, a, 'shared.ts');
-  await expect(page.locator('.annotation-pill')).toHaveCount(1);
-  await expect(page.locator('.annotation-pill')).toContainText('只属于项目 A');
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toHaveCount(1);
+  await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toContainText(
+    '只属于项目 A',
+  );
 });
 
 test('code fills the reader, wrap respects preference and long files remain scrollable', async ({
@@ -180,24 +192,30 @@ test('code fills the reader, wrap respects preference and long files remain scro
   const reader = await page.locator('.code-reader-container').boundingBox();
   expect(Math.abs(body!.width - reader!.width)).toBeLessThan(2);
   await page.getByRole('button', { name: '自动换行', exact: true }).click();
-  await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/);
-  await open(page, lib, 'long.ts');
-  await expect(page.locator('.cm-content')).not.toHaveClass(/cm-lineWrapping/);
-  expect(await page.locator('.cm-scroller').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(
-    true,
+  await expect(page.locator('.reader-panel:not([hidden]) .cm-content')).not.toHaveClass(
+    /cm-lineWrapping/,
   );
-  const scroller = page.locator('.cm-scroller');
+  await open(page, lib, 'long.ts');
+  await expect(page.locator('.reader-panel:not([hidden]) .cm-content')).not.toHaveClass(
+    /cm-lineWrapping/,
+  );
+  expect(
+    await page
+      .locator('.reader-panel:not([hidden]) .cm-scroller')
+      .evaluate((el) => el.scrollWidth > el.clientWidth),
+  ).toBe(true);
+  const scroller = page.locator('.reader-panel:not([hidden]) .cm-scroller');
   await scroller.evaluate((el) => {
     el.scrollTop = 1300;
   });
   await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(1200);
   await page.reload();
-  await expect(page.locator('.cm-content')).toBeVisible();
+  await expect(page.locator('.reader-panel:not([hidden]) .cm-content')).toBeVisible();
   await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(1200);
   await scroller.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
   });
-  await expect(page.locator('.cm-content')).toContainText('line159');
+  await expect(page.locator('.reader-panel:not([hidden]) .cm-content')).toContainText('line159');
   const geometry = await scroller.evaluate((el) => ({
     bottom: el.getBoundingClientRect().bottom,
     containerBottom: el.closest('.document-body')!.getBoundingClientRect().bottom,
@@ -258,7 +276,7 @@ test('reading resumes, real headings navigate and explicit searches override sav
     'other.md': '# 另一个文件\n\n内容',
   });
   await open(page, lib, 'long.md');
-  const article = page.locator('article.markdown');
+  const article = page.locator('.reader-panel:not([hidden]) article.markdown');
   await article.evaluate((el) => {
     el.scrollTop = 1250;
   });
@@ -390,7 +408,7 @@ test('session expiry keeps user annotation drafts and active logout clears them 
   await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
   await context.clearCookies();
   await page.reload();
-  await expect(page.locator('.markdown-content')).toBeVisible();
+  await expect(page.locator('.reader-panel:not([hidden]) .markdown-content')).toBeVisible();
   await syncNow(page);
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible();
   const drafts = () =>
@@ -447,7 +465,7 @@ test('server annotations reach a new device, failed saves stay local and open-ed
   await syncNow(page);
   await rejectedRetry;
   await expect(page.locator('.annotation-pill.status-pending')).toContainText('服务失败也不能丢失');
-  await page.locator('.annotation-pill').click();
+  await page.locator('.reader-panel:not([hidden]) .annotation-pill').click();
   await expect(page.getByRole('button', { name: '立即重试同步' })).toBeVisible();
   await page.unroute(writes);
   await page.getByRole('button', { name: '立即重试同步' }).click();
@@ -473,7 +491,7 @@ test('server annotations reach a new device, failed saves stay local and open-ed
     });
     await expect.poll(() => page.evaluate(() => history.state?.codesipLayer)).toBeUndefined();
     await page.getByRole('button', { name: '同步', exact: true }).click();
-    await page.locator('.annotation-pill').click();
+    await page.locator('.reader-panel:not([hidden]) .annotation-pill').click();
     await page.getByRole('textbox', { name: '批注内容' }).fill('编辑器里尚未提交的本机草稿');
     const existing = (await list())[0];
     const update = await device.request.put(`${apiPath}/${existing.id}`, {
@@ -490,7 +508,9 @@ test('server annotations reach a new device, failed saves stay local and open-ed
     releaseSnapshot();
     await expect(page.getByRole('button', { name: '正在同步', exact: true })).toHaveCount(0);
     await page.unroute(`**/api/libraries/${lib.id}/reader-state`);
-    await expect(page.locator('.annotation-pill')).toContainText('另一台设备的新版本');
+    await expect(page.locator('.reader-panel:not([hidden]) .annotation-pill')).toContainText(
+      '另一台设备的新版本',
+    );
     await expect(page.getByRole('textbox', { name: '批注内容' })).toHaveValue(
       '编辑器里尚未提交的本机草稿',
     );
@@ -500,7 +520,7 @@ test('server annotations reach a new device, failed saves stay local and open-ed
     expect((await list())[0].note).toBe('另一台设备的新版本');
     await page.reload();
     await expect(page.locator('.annotation-pill.status-conflict')).toContainText('本机草稿');
-    await page.locator('.annotation-pill').click();
+    await page.locator('.reader-panel:not([hidden]) .annotation-pill').click();
     await expect(page.getByRole('button', { name: '采用服务器版本' })).toBeVisible();
     await expect(page.getByRole('dialog', { name: '编辑批注' })).toContainText(
       '批注已在其他设备更新或删除',

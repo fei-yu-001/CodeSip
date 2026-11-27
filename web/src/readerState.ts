@@ -81,7 +81,8 @@ export function trackReadingPosition(element: HTMLElement, key: string, restore 
     if (restoring) return;
     // pagehide can precede the scroll event. After a React unmount, the detached
     // element reports zero, so retain the last position observed while connected.
-    if (element.isConnected) current = { top: element.scrollTop, left: element.scrollLeft };
+    if (element.isConnected && element.getClientRects().length)
+      current = { top: element.scrollTop, left: element.scrollLeft };
     if (!changed && current.top === lastSaved.top && current.left === lastSaved.left) return;
     try {
       localStorage.setItem(key, JSON.stringify(current));
@@ -92,7 +93,7 @@ export function trackReadingPosition(element: HTMLElement, key: string, restore 
     changed = false;
   };
   const restorePosition = () => {
-    if (!restoring || !position) return;
+    if (!restoring || !position || !element.getClientRects().length) return;
     element.scrollTop = position.top;
     element.scrollLeft = position.left;
     if (Math.abs(element.scrollTop - position.top) < 2) {
@@ -105,7 +106,7 @@ export function trackReadingPosition(element: HTMLElement, key: string, restore 
     restoring = false;
   };
   const scroll = () => {
-    if (restoring) return;
+    if (restoring || (element.isConnected && !element.getClientRects().length)) return;
     current = { top: element.scrollTop, left: element.scrollLeft };
     changed = true;
     clearTimeout(timer);

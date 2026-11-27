@@ -54,8 +54,12 @@ export function useMarkdownDocument(text: string) {
     };
   }, [text, attempt]);
   useEffect(() => {
-    if (current.error || current.total === undefined || current.chunks.length === current.total)
+    if (current.total !== undefined && current.chunks.length === current.total) {
+      workerRef.current?.terminate();
+      workerRef.current = null;
       return;
+    }
+    if (current.error || current.total === undefined) return;
     // Pull only after the previous React commit and a paint, so parsing cannot
     // flood the main thread with messages or starve touch/scroll input.
     let timer: ReturnType<typeof setTimeout>;

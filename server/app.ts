@@ -332,11 +332,29 @@ export async function buildApp(options: AppOptions) {
     store.db.prepare('DELETE FROM tokens WHERE library_id=?').run(req.params.id);
     return { ok: true };
   });
-  app.post<{ Querystring: { name: string; kind: string } }>('/api/import', async (req) => {
+  app.post<{
+    Querystring: { name: string; kind: string; libraryId?: string; baseRevision?: string };
+  }>('/api/import', async (req) => {
     const part = await req.file();
     if (!part) throw new ApiError(400, '请选择 ZIP 文件');
     const bytes = await part.toBuffer();
     const files = await readArchive(bytes);
+    if (req.query.libraryId) {
+      const previous = store.manifest(req.identity!.user.id, req.query.libraryId);
+      if (previous.library.kind !== (req.query.kind || 'code'))
+        throw new ApiError(400, '更新目标的项目类型不匹配');
+      const revision = Number(req.query.baseRevision);
+      if (!req.query.baseRevision || !Number.isSafeInteger(revision) || revision < 0)
+        throw new ApiError(400, '更新项目需要有效的版本号');
+      const incoming = new Set(files.map((file) => file.path));
+      store.put(
+        previous.library.id,
+        files,
+        previous.files.filter((file) => !incoming.has(file.path)).map((file) => file.path),
+        revision,
+      );
+      return { library: store.library(req.identity!.user.id, previous.library.id) };
+    }
     const lib = store.createLibrary(
       req.identity!.user.id,
       req.query.name || part.filename.replace(/\.zip$/i, ''),
