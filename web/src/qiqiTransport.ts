@@ -1,5 +1,6 @@
 import type { JsonObject } from '@earendil-works/pi-ai';
 import { qiqiFetch, QiqiNativeError } from './qiqiNative';
+import { qiqiServiceError } from './qiqiServiceError';
 import { qiqiEndpoint, validateQiqiConfig, QIQI_REPLY_LIMIT, type QiqiConfig } from './qiqiChat';
 
 export interface WireMessage {
@@ -66,6 +67,7 @@ export async function streamQiqiCompletion({
     );
   }
   if (!response.ok) {
+    if (response.status === 503) throw await qiqiServiceError(response, signal);
     await response.body?.cancel();
     throw new Error(
       response.status === 401 || response.status === 403

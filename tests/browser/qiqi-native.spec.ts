@@ -16,6 +16,7 @@ type NativeHarness = {
   cancels: number;
   status: number;
   error: boolean;
+  errorBody: string;
 };
 const test = base.extend<{ native: NativeHarness }>({
   native: async ({ page }, use) => {
@@ -27,6 +28,7 @@ const test = base.extend<{ native: NativeHarness }>({
       cancels: 0,
       status: 200,
       error: false,
+      errorBody: secret,
     };
     // This gateway deliberately supplies no CORS headers. The JS/native contract
     // crosses a real process boundary, then makes a real request outside the page.
@@ -45,9 +47,11 @@ const test = base.extend<{ native: NativeHarness }>({
           body: JSON.parse(Buffer.concat(chunks).toString()),
         });
         fixture.responses.push(response);
-        response.writeHead(fixture.status, { 'content-type': 'text/event-stream' });
+        response.writeHead(fixture.status, {
+          'content-type': fixture.status === 200 ? 'text/event-stream' : 'application/json',
+        });
         if (fixture.status !== 200) {
-          response.end(secret);
+          response.end(fixture.errorBody);
           return;
         }
         response.write(delta(first));
@@ -249,4 +253,32 @@ test('old Harmony installations give an installation update hint on connection f
   await dialog.getByRole('button', { name: '发送', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('更新 CodeSip 鸿蒙安装包');
   expect(native.requests).toHaveLength(0);
+});
+
+test('native 503 exposes a safe model-channel reason and leaves the question available for retry', async ({
+  page,
+  native,
+}) => {
+  native.status = 503;
+  native.errorBody = JSON.stringify({
+    error: {
+      type: 'new_api_error',
+      code: 'model_not_found',
+      message: `当前分组 synthetic 下对于模型 synthetic 无可用渠道 ${secret}`,
+    },
+  });
+  const dialog = await configure(page, native);
+  await dialog.getByRole('textbox', { name: '给七七的消息' }).fill(question);
+  await dialog.getByRole('button', { name: '发送', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('没有可用的模型通道（503）');
+  await expect(dialog.getByRole('alert')).not.toContainText(secret);
+  await expect(dialog.getByRole('alert')).not.toContainText('CORS');
+  await expect(dialog.locator('.qiqi-user')).toHaveCount(1);
+  expect(native.requests).toHaveLength(1);
+  native.status = 200;
+  await dialog.getByRole('button', { name: '重试回答', exact: true }).click();
+  await expect.poll(() => native.requests.length).toBe(2);
+  native.responses[1].end(delta(second) + 'data: [DONE]\n\n');
+  await expect(dialog.getByText(first + second, { exact: true })).toBeVisible();
+  await expect(dialog.locator('.qiqi-user')).toHaveCount(1);
 });
