@@ -93,6 +93,13 @@ export default function MarkdownReader({
       return 17;
     }
   });
+  const [wide, setWide] = useState(() => {
+    try {
+      return localStorage.getItem('codesip:reading-width') === 'wide';
+    } catch {
+      return false;
+    }
+  });
   const [spacing, setSpacing] = useState(() => {
     try {
       return localStorage.getItem('codesip:line-spacing') === 'compact' ? 'compact' : 'relaxed';
@@ -301,7 +308,7 @@ export default function MarkdownReader({
       )}
       <article
         ref={articleRef}
-        className={`markdown theme-${theme} ${codeOnly ? 'code-only-mode' : ''}`}
+        className={`markdown theme-${theme} ${codeOnly ? 'code-only-mode' : ''} ${wide ? 'reading-wide' : ''}`}
         style={
           {
             '--reader-font-size': `${fontSize}px`,
@@ -435,6 +442,31 @@ export default function MarkdownReader({
                     }}
                   >
                     A+
+                  </button>
+                </div>
+              </div>
+              <div className="reader-setting-row">
+                <span>阅读宽度</span>
+                <div className="reader-segment">
+                  <button
+                    type="button"
+                    aria-pressed={!wide}
+                    onClick={() => {
+                      setWide(false);
+                      preference('codesip:reading-width', 'comfortable');
+                    }}
+                  >
+                    舒适
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={wide}
+                    onClick={() => {
+                      setWide(true);
+                      preference('codesip:reading-width', 'wide');
+                    }}
+                  >
+                    铺满
                   </button>
                 </div>
               </div>

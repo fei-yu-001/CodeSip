@@ -1,0 +1,32 @@
+/* Keep the editor bounded by its flex viewport. Long source lines scroll inside
+   CodeMirror; they must never determine the width of the document or page. */
+.code-reader-container > .code-reader {
+  align-self: stretch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.code-reader-container > .code-reader > .cm-editor {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 100%;
+  text-align: left;
+}
+
+.code-reader-container > .code-reader .cm-scroller {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  overscroll-behavior: contain;
+  /* A real vertical scrollbar reserves space without Chromium's extra stable
+     gutter being counted in scrollWidth beyond the reachable horizontal end. */
+  overflow-y: scroll;
+}
+
+.code-reader-container > .code-reader .cm-content {
+  font-variant-ligatures: none;
+}

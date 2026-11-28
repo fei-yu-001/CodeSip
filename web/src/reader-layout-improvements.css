@@ -1,0 +1,124 @@
+/* The reader uses the full application width; project navigation stays beside it. */
+.app.reading > .sidebar {
+  display: none;
+}
+.app.reading > .main {
+  margin-left: 0;
+  min-width: 0;
+}
+.reader-directory-shortcut {
+  display: none;
+}
+.app.reading .file-panel > .panel-title {
+  gap: 8px;
+}
+.app.reading .file-panel > .panel-title > span {
+  flex: 1;
+  min-width: 0;
+}
+.directory-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app.reading .file-panel > .panel-title svg {
+  flex-shrink: 0;
+}
+.app.reading .file-panel .reader-back {
+  flex-shrink: 0;
+}
+@media (min-width: 761px) {
+  .app.reading:not(.reading-focused) .topbar {
+    height: 52px;
+    padding: 0 20px;
+  }
+  .app.reading:not(.reading-focused) .reader-layout {
+    height: calc(100dvh - 52px);
+  }
+  .app.reading .file-panel {
+    width: clamp(210px, 20vw, 248px);
+  }
+  .app.reading .document-toolbar {
+    height: 46px;
+  }
+  .app.reading .file-filter input {
+    font-size: 13px;
+  }
+  .app.reading .tree-file,
+  .app.reading .tree summary {
+    font-size: 13px;
+  }
+}
+@media (max-width: 760px) {
+  .app.reading .file-panel .reader-back {
+    display: none;
+  }
+  .mobile-reader-file {
+    gap: 6px;
+  }
+  .mobile-reader-file > .mobile-directory-label {
+    flex: 0 0 auto;
+    color: var(--accent-primary);
+    font-weight: 600;
+  }
+  .mobile-reader-filename {
+    min-width: 0;
+    color: var(--text-secondary);
+  }
+  .reader-directory-shortcut {
+    position: fixed;
+    left: max(12px, env(safe-area-inset-left));
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 30;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--border-hairline);
+    border-radius: 999px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-soft);
+    font-size: 13px;
+  }
+  .reader-directory-shortcut:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 3px;
+  }
+  /* Keep bottom code annotations clickable beside the directory shortcut. */
+  .app.reading:not(.reading-focused) .code-reader-container > .reader-annotations {
+    min-height: 68px;
+    padding-left: 104px;
+  }
+  /* Leave the existing Markdown actions available at the bottom. */
+  .app.reading:has(.reader-panel:not([hidden]) .markdown-reader) .reader-directory-shortcut {
+    bottom: calc(66px + env(safe-area-inset-bottom));
+  }
+  .app.reading .reader-panel .markdown-reader > article.markdown {
+    padding-bottom: 92px;
+  }
+}
+.project-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.reader-empty[role='alert'] {
+  padding: 24px;
+  text-align: center;
+}
+.reader-empty[role='alert'] p {
+  max-width: 440px;
+  line-height: 1.7;
+}
+.app.reading .markdown-reader > article.markdown.reading-wide {
+  padding-left: clamp(16px, 2vw, 28px);
+  padding-right: clamp(16px, 2vw, 28px);
+}
+.app.reading .markdown-reader article.reading-wide .markdown-content,
+.app.reading .markdown-reader article.code-only-mode .markdown-content {
+  max-width: none;
+}

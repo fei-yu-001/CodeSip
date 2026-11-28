@@ -80,21 +80,15 @@ import './reader-space.css';
 import LibraryCard from './LibraryCard';
 import { removeLibraryReaderData } from './readerIdentity';
 import './file-management.css';
+import './reader-layout-improvements.css';
+import {
+  loadProjectManifest,
+  readProjectRoute,
+  ProjectManifestMismatchError,
+} from './projectNavigation';
 
 type DeleteTarget = { library: Library; file?: FileEntry };
-type Route = { kind: LibraryKind; id?: string; file?: string; line?: number; heading?: string };
-const readRoute = (): Route => {
-  const [path, query] = location.hash.slice(1).split('?');
-  const [kind, id] = path.split('/');
-  const params = new URLSearchParams(query);
-  return {
-    kind: kind === 'notes' ? 'notes' : 'code',
-    id: id || undefined,
-    file: params.get('file') || undefined,
-    heading: params.get('heading') || undefined,
-    line: params.has('line') ? Math.max(1, Math.floor(Number(params.get('line')) || 1)) : undefined,
-  };
-};
+const readRoute = () => readProjectRoute(location.hash);
 function Brand({ small = false }: { small?: boolean }) {
   return (
     <div className={`brand ${small ? 'small' : ''}`}>
@@ -327,6 +321,7 @@ export default function App() {
       setToken('');
     }
   }, [modal]);
+  const [projectError, setProjectError] = useState('');
   const [theme, setTheme] = useState<ReaderTheme>(readTheme);
   const dark = theme === 'warm-slate';
   const [jump, setJump] = useState(0);
@@ -493,38 +488,49 @@ export default function App() {
   }, [refresh]);
   const loadManifest = useCallback(async () => {
     const seq = ++manifestSeq.current;
+    setProjectError('');
     if (!user || !route.id) {
       setManifest(undefined);
       return;
     }
     try {
-      const local = await cached<Manifest>(manifestKey(user, route.id)).catch(() => undefined);
+      const result = await loadProjectManifest({
+        user,
+        libraryId: route.id,
+        online: navigator.onLine,
+      });
+      // A late response must not write private data after logout or a newer navigation.
       if (seq !== manifestSeq.current) return;
-      if (local) {
-        setManifest(local);
-        return;
+      if (result.source === 'network') {
+        await save(manifestKey(user, route.id), result.manifest).catch(() =>
+          notify('本机存档未能保存，请检查存储空间'),
+        );
+        if (seq !== manifestSeq.current) return;
+        setOffline(false);
       }
-      const data = await api<Manifest>(`/libraries/${route.id}/manifest`);
-      if (seq !== manifestSeq.current) return;
-      await save(manifestKey(user, route.id), data).catch(() =>
-        notify('本机存档未能保存，请检查存储空间'),
-      );
-      if (seq !== manifestSeq.current) return;
-      setManifest(data);
-      setOffline(false);
+      setManifest(result.manifest);
     } catch (e) {
       if (seq !== manifestSeq.current) return;
-      if (!(e instanceof HttpError)) {
-        const data = await cached<Manifest>(manifestKey(user, route.id));
-        if (seq !== manifestSeq.current) return;
-        if (data) {
-          setManifest(data);
-          setOffline(true);
-        } else {
-          setManifest(undefined);
-          notify('这个项目尚未下载，请联网后打开');
-        }
-      } else handleError(e);
+      if (e instanceof HttpError && e.status === 401) {
+        handleError(e);
+        return;
+      }
+      setManifest(undefined);
+      if (e instanceof HttpError) {
+        setProjectError(
+          e.status === 404
+            ? '找不到这个项目：它可能已被删除，或不属于当前账号。'
+            : e.message || '项目读取失败，请重试',
+        );
+      } else if (e instanceof ProjectManifestMismatchError) {
+        setProjectError(e.message);
+      } else {
+        setProjectError(
+          navigator.onLine
+            ? '无法连接服务器，这个项目还没有本机存档。请检查网络后重试。'
+            : '这个项目尚未下载，请联网后打开',
+        );
+      }
     }
   }, [user, route.id, handleError, notify]);
   const latestLoadManifest = useRef(loadManifest);
@@ -960,11 +966,21 @@ export default function App() {
             {route.id && (
               <>
                 <ChevronRight size={14} />
-                <span>{manifest?.library.name || '加载中…'}</span>
+                <span>{manifest?.library.name || (projectError ? '项目不可用' : '加载中…')}</span>
               </>
             )}
           </div>
           <div className="top-actions">
+            {route.id && (
+              <button
+                className="icon-button reader-theme-toggle"
+                aria-label="切换明暗主题"
+                title="切换明暗主题"
+                onClick={() => setTheme(theme === 'warm-slate' ? 'paper-light' : 'warm-slate')}
+              >
+                {dark ? <Sun size={17} /> : <Moon size={17} />}
+              </button>
+            )}
             {offline && (
               <span className="offline-label">
                 <WifiOff size={14} /> 离线
@@ -1167,10 +1183,25 @@ export default function App() {
           </div>
         )}
         <div className="reader-layout" hidden={!route.id}>
-          <aside className={`file-panel ${showTree ? 'open' : ''}`}>
+          <aside
+            id="project-file-tree"
+            aria-label="项目目录"
+            className={`file-panel ${showTree ? 'open' : ''}`}
+          >
             <div className="panel-title">
-              <span>
-                <Layers3 size={15} /> 项目目录
+              <button
+                className="icon-button reader-back"
+                aria-label="返回项目列表"
+                title="返回项目列表"
+                onClick={() => setRouteTo(route.kind)}
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <span title={manifest?.library.name}>
+                <FolderOpen size={17} />
+                <span className="directory-project-name">
+                  {manifest?.library.name || '项目目录'}
+                </span>
               </span>
               <button
                 className="icon-button mobile-only"
@@ -1222,7 +1253,13 @@ export default function App() {
                   }}
                 />
               ) : (
-                <p className="muted tree-empty">{manifest ? '还没有文件' : '正在读取目录…'}</p>
+                <p className="muted tree-empty">
+                  {projectError
+                    ? '目录读取失败，可在右侧重试'
+                    : manifest
+                      ? '还没有文件'
+                      : '正在读取目录…'}
+                </p>
               )}
             </div>
             <div className="file-panel-bottom">
@@ -1275,10 +1312,23 @@ export default function App() {
             </div>
           </aside>
           {showTree && <div className="tree-scrim" onClick={() => setShowTree(false)} />}
+          {route.id && !focused && !showTree && !showSearch && !showOutline && !modal && (
+            <button
+              className="reader-directory-shortcut"
+              aria-label="浏览文件目录"
+              aria-controls="project-file-tree"
+              aria-expanded={showTree}
+              onClick={() => setShowTree(true)}
+            >
+              <FolderOpen size={19} />
+              <span>目录</span>
+            </button>
+          )}
           <section className="document">
             <MobileReaderToolbar
               path={route.file}
               libraryName={manifest?.library.name}
+              directoryOpen={showTree}
               isMarkdown={isMarkdown}
               wrap={wrap}
               refreshing={isRefreshing}
@@ -1408,6 +1458,9 @@ export default function App() {
                 key={user.id}
                 user={user}
                 manifest={manifest}
+                projectError={projectError}
+                retryProject={() => void loadManifest()}
+                libraryKind={route.kind}
                 libraryId={route.id}
                 deletedLibraryId={deletedLibraryId}
                 deletedFile={deletedFile}

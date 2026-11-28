@@ -15,6 +15,9 @@ interface OpenDocument {
 interface WorkspaceProps {
   user: User;
   manifest?: Manifest;
+  projectError?: string;
+  retryProject: () => void;
+  libraryKind: LibraryKind;
   deletedLibraryId?: string;
   deletedFile?: { libraryId: string; path: string };
   libraryId?: string;
@@ -176,26 +179,42 @@ export default function ReaderWorkspace(props: WorkspaceProps) {
           </div>
         ))}
         {!current && (
-          <div className="reader-empty">
-            {path && (!manifest || manifest.library.id !== libraryId) ? (
+          <div className="reader-empty" role={props.projectError ? 'alert' : undefined}>
+            {props.projectError ? (
+              <CloudOff size={35} />
+            ) : path && (!manifest || manifest.library.id !== libraryId) ? (
               <LoaderCircle className="spin" size={30} />
             ) : (
               <BookOpen size={35} />
             )}
             <p>
-              {path
-                ? manifest &&
-                  manifest.library.id === libraryId &&
-                  !manifest.files.some((file) => file.path === path)
-                  ? '这份文件已移动或删除，请从目录重新选择'
-                  : '正在打开文件…'
-                : '选择文件开始阅读'}
+              {props.projectError ||
+                (path
+                  ? manifest &&
+                    manifest.library.id === libraryId &&
+                    !manifest.files.some((file) => file.path === path)
+                    ? '这份文件已移动或删除，请从目录重新选择'
+                    : '正在打开文件…'
+                  : '选择文件开始阅读')}
             </p>
-            {!path && manifest?.library.kind === 'notes' && !manifest.files.length && (
-              <button className="button primary" disabled={props.offline} onClick={props.connect}>
-                设置云端同步
-              </button>
+            {props.projectError && (
+              <div className="project-recovery-actions">
+                <button className="button primary" onClick={props.retryProject}>
+                  重试打开项目
+                </button>
+                <button className="button" onClick={() => navigate(props.libraryKind)}>
+                  回到项目列表
+                </button>
+              </div>
             )}
+            {!props.projectError &&
+              !path &&
+              manifest?.library.kind === 'notes' &&
+              !manifest.files.length && (
+                <button className="button primary" disabled={props.offline} onClick={props.connect}>
+                  设置云端同步
+                </button>
+              )}
           </div>
         )}
       </div>

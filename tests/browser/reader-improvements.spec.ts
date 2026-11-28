@@ -371,9 +371,9 @@ test('account dialog and refresh feedback replace window.confirm and provide act
   await dialog.getByRole('button', { name: '取消' }).click();
   await expect(dialog).toHaveCount(0);
 
-  // 2. 桌面侧栏退出按钮同样进入应用内弹窗
+  // 2. 桌面阅读保持顶部账号入口，重复打开/关闭不影响阅读
   if (info.project.name === 'desktop') {
-    await page.getByRole('button', { name: '退出登录' }).click();
+    await page.getByRole('button', { name: '账号与退出', exact: true }).click();
     await expect(page.getByRole('dialog', { name: '当前账号' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: '当前账号' })).toHaveCount(0);

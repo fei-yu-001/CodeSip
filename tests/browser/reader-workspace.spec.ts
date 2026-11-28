@@ -1,4 +1,4 @@
-import { readerControl } from './reader-controls';
+import { closeReaderTools, readerControl } from './reader-controls';
 import { test, expect, type Page } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 const origin = 'http://127.0.0.1:4319';
@@ -153,10 +153,11 @@ test('code zoom reconfigures the existing read-only reader and keeps fold and sc
   await expect(editor).toHaveCSS('font-size', '14px');
   await expect(editor.locator('.cm-content')).toHaveAttribute('contenteditable', 'false');
   await (await readerControl(page, '自动换行')).click();
-  await editor.locator('.cm-scroller').evaluate((element) => {
-    element.scrollTop = 700;
-    element.scrollLeft = 120;
-  });
+  await closeReaderTools(page);
+  // Use real input: a new user scroll must take precedence over pending zoom or
+  // wrap measurements, rather than racing them with a synthetic scrollTop write.
+  await editor.locator('.cm-scroller').hover();
+  await page.mouse.wheel(120, 700);
   await expect
     .poll(() => editor.locator('.cm-scroller').evaluate((element) => element.scrollTop))
     .toBeGreaterThan(600);

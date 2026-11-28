@@ -6,7 +6,7 @@ import {
   Layers3,
   LoaderCircle,
   Maximize2,
-  Menu,
+  FolderOpen,
   MoreHorizontal,
   RefreshCw,
   Search,
@@ -18,6 +18,7 @@ import { useDismissibleLayer } from './readerNavigation';
 interface Props {
   path?: string;
   libraryName?: string;
+  directoryOpen?: boolean;
   isMarkdown: boolean;
   wrap: boolean;
   refreshing: boolean;
@@ -60,11 +61,16 @@ export default function MobileReaderToolbar(props: Props) {
       <button
         className="mobile-reader-file"
         aria-label="打开目录"
+        aria-controls="project-file-tree"
+        aria-expanded={props.directoryOpen}
         title={props.path || props.libraryName}
         onClick={() => act(props.directory)}
       >
-        <Menu size={18} />
-        <span>{props.path?.split('/').pop() || '选择文件'}</span>
+        <FolderOpen size={18} />
+        <span className="mobile-directory-label">目录</span>
+        <span className="mobile-reader-filename">
+          {props.path?.split('/').pop() || props.libraryName || '选择文件'}
+        </span>
       </button>
       <button
         className="icon-button"
