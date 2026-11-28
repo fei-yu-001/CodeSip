@@ -248,7 +248,7 @@ test('themes stay synchronized across notes, home and reload', async ({ page }, 
   await expect(page).toHaveURL(/#notes$/);
   await expect(page.getByRole('heading', { name: '学习笔记', exact: true })).toBeVisible();
   if (info.project.name === 'mobile') {
-    await page.locator('.mobile-nav').getByRole('button', { name: '阅读主题' }).click();
+    await page.locator('.topbar').getByRole('button', { name: '切换明暗主题' }).click();
     await expect(page.locator('.theme-drawer-item.active')).toContainText('松烟暖灰');
     await page.locator('.theme-drawer-item').filter({ hasText: '羊皮纸棕' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'sepia-parchment');

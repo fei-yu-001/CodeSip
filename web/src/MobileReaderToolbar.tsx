@@ -9,6 +9,8 @@ import {
   FolderOpen,
   MoreHorizontal,
   MessageCircle,
+  Moon,
+  Sun,
   RefreshCw,
   Search,
   UserRound,
@@ -31,6 +33,9 @@ interface Props {
   home: () => void;
   directory: () => void;
   focus: () => void;
+  dark: boolean;
+  themeMenuOpen: boolean;
+  chooseTheme: () => void;
   synchronize: () => void;
   search: () => void;
   toggleWrap: () => void;
@@ -83,6 +88,16 @@ export default function MobileReaderToolbar(props: Props) {
       >
         <MessageCircle size={18} />
         <span>七七</span>
+      </button>
+      <button
+        className="icon-button"
+        aria-label="切换明暗主题"
+        title="阅读主题"
+        aria-haspopup="dialog"
+        aria-expanded={props.themeMenuOpen}
+        onClick={() => act(props.chooseTheme)}
+      >
+        {props.dark ? <Moon size={18} /> : <Sun size={18} />}
       </button>
       <button
         className="icon-button"

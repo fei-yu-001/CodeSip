@@ -165,7 +165,7 @@ export default function GlassEffects() {
       });
     const down = (event: PointerEvent) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>('.mobile-nav>button');
-      if (!target || target.querySelector('.lucide-log-out,.lucide-moon,.lucide-sun')) return;
+      if (!target || target.hasAttribute('aria-haspopup')) return;
       const nav = target.parentElement!;
       const selected = nav.querySelector<HTMLElement>('button.active') || target;
       gesture = {

@@ -39,6 +39,7 @@ export function useQiqiChat(userId: string) {
   const [activeId, setActiveId] = useState(conversations[0].id);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
+  const [activity, setActivity] = useState('');
   const [storageError, setStorageError] = useState('');
   const controller = useRef<AbortController | null>(null);
   const validSession = useRef(true);
@@ -141,6 +142,7 @@ export function useQiqiChat(userId: string) {
       ),
     );
     setRunning(true);
+    setActivity('正在回答…');
     setError('');
     void (async () => {
       let partial = '';
@@ -149,6 +151,15 @@ export function useQiqiChat(userId: string) {
           config,
           messages: history,
           signal,
+          onActivity: (text) => {
+            if (validSession.current && controller.current === abort) setActivity(text);
+          },
+          readReference: async (context, startLine, lineCount, readSignal) => {
+            if (!validSession.current || context.identity.userId !== userId)
+              throw new Error('当前账号无法读取这份引用');
+            const { readQiqiReference } = await import('./qiqiReferences');
+            return readQiqiReference(context, startLine, lineCount, readSignal);
+          },
           onText: (text) => {
             partial = text;
             update(text, 'stopped');
@@ -179,6 +190,7 @@ export function useQiqiChat(userId: string) {
     conversations,
     current,
     running,
+    activity,
     error,
     storageError,
     setError,

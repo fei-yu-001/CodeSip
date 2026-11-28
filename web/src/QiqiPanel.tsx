@@ -29,6 +29,7 @@ function ContextPreview({ context, remove }: { context: QiqiContext; remove?: ()
         </p>
       )}
       {context.truncated && <p>片段过长，已截取前面的内容。</p>}
+      {context.allowSourceRead && <p>本条消息允许按需读取同一版本的原文。</p>}
       {remove && (
         <button type="button" onClick={remove}>
           移除引用
@@ -113,7 +114,7 @@ export default function QiqiPanel({
   notify: (message: string) => void;
 }) {
   const chat = useQiqiChat(userId);
-  const { config, conversations, current, running, error, storageError, setError } = chat;
+  const { config, conversations, current, running, activity, error, storageError, setError } = chat;
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState(false);
   const [input, setInput] = useState('');
@@ -158,7 +159,7 @@ export default function QiqiPanel({
     const attach = (event: Event) => {
       const value = (event as CustomEvent<QiqiContext>).detail;
       if (value?.identity.userId !== userId || !validSession.current) return;
-      setContext(value);
+      setContext({ ...value, allowSourceRead: false });
       setSettings(false);
       setReply(undefined);
       setOpen(true);
@@ -276,17 +277,6 @@ export default function QiqiPanel({
   const last = current.messages.at(-1);
   return (
     <>
-      <button
-        type="button"
-        className="icon-button qiqi-launcher"
-        aria-label="打开七七"
-        title="七七 · 阅读助手"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-      >
-        <MessageCircle size={18} />
-        <span>七七</span>
-      </button>
       {open &&
         createPortal(
           <div className="qiqi-scrim" onClick={close}>
@@ -301,7 +291,7 @@ export default function QiqiPanel({
               <header className="qiqi-header">
                 <div>
                   <strong>七七</strong>
-                  <span>{running ? '正在回答…' : config.model || '阅读助手'}</span>
+                  <span>{running ? activity || '正在回答…' : config.model || '阅读助手'}</span>
                 </div>
                 <button
                   type="button"
@@ -507,6 +497,21 @@ export default function QiqiPanel({
                           <X size={15} />
                         </button>
                       </div>
+                    )}
+                    {context?.sourceHash && (
+                      <label className="qiqi-source-permission">
+                        <input
+                          type="checkbox"
+                          checked={context.allowSourceRead === true}
+                          disabled={running}
+                          onChange={(event) =>
+                            setContext({ ...context, allowSourceRead: event.target.checked })
+                          }
+                        />
+                        <span>
+                          本次允许读取这份原文<small>按需发送更多行给当前 API</small>
+                        </span>
+                      </label>
                     )}
                     {context && (
                       <div className="qiqi-prompts">

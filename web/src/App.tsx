@@ -31,6 +31,7 @@ import {
   Maximize2,
   Minimize2,
   Moon,
+  MessageCircle,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -75,6 +76,8 @@ import ReaderWorkspace from './ReaderWorkspace';
 import MobileReaderToolbar from './MobileReaderToolbar';
 import './reader-space.css';
 import QiqiPanel from './QiqiPanel';
+import { openQiqi } from './qiqiChat';
+import ReadingThemeMenu from './ReadingThemeMenu';
 import { retainLocalArchives, type LibraryListing } from './data/libraryCatalog';
 import './library-archives.css';
 import LibraryCard from './LibraryCard';
@@ -923,16 +926,12 @@ export default function App() {
             学习笔记
             <span>{libraries.filter((l) => !l.localOnly && l.kind === 'notes').length}</span>
           </button>
+          <button aria-label="打开七七" aria-haspopup="dialog" onClick={openQiqi}>
+            <MessageCircle size={19} />
+            七七
+          </button>
         </nav>
         <div className="sidebar-bottom">
-          <button
-            className="theme-switch"
-            onClick={() => setTheme(theme === 'warm-slate' ? 'paper-light' : 'warm-slate')}
-            aria-label="切换明暗主题"
-          >
-            {theme === 'warm-slate' ? <Sun size={17} /> : <Moon size={17} />}
-            <span>{theme === 'warm-slate' ? '素笺暖白' : '松烟暖灰'}</span>
-          </button>
           <div className="profile">
             <div className="avatar">
               <img src="/qiqi-avatar.jpg" alt="七七头像" />
@@ -968,17 +967,28 @@ export default function App() {
             )}
           </div>
           <div className="top-actions">
-            <QiqiPanel key={user.id} userId={user.id} notify={notify} />
             {route.id && (
               <button
-                className="icon-button reader-theme-toggle"
-                aria-label="切换明暗主题"
-                title="切换明暗主题"
-                onClick={() => setTheme(theme === 'warm-slate' ? 'paper-light' : 'warm-slate')}
+                className="icon-button qiqi-launcher"
+                aria-label="打开七七"
+                aria-haspopup="dialog"
+                onClick={openQiqi}
               >
-                {dark ? <Sun size={17} /> : <Moon size={17} />}
+                <MessageCircle size={18} />
+                <span>七七</span>
               </button>
             )}
+            <button
+              className="icon-button reader-theme-toggle"
+              aria-label="切换明暗主题"
+              title="阅读主题"
+              aria-haspopup="dialog"
+              aria-expanded={themeMenuOpen}
+              onClick={() => setThemeMenuOpen(true)}
+            >
+              {dark ? <Moon size={17} /> : <Sun size={17} />}
+              <span>主题</span>
+            </button>
             {offline && (
               <span className="offline-label">
                 <WifiOff size={14} /> 离线
@@ -1354,6 +1364,9 @@ export default function App() {
               home={() => setRouteTo(route.kind)}
               directory={() => setShowTree(true)}
               focus={enterFocus}
+              dark={dark}
+              themeMenuOpen={themeMenuOpen}
+              chooseTheme={() => setThemeMenuOpen(true)}
               synchronize={() => void synchronize()}
               search={() => setShowSearch(true)}
               toggleWrap={() => setWrap(!wrap)}
@@ -1579,68 +1592,19 @@ export default function App() {
           <Code2 size={20} />
           代码项目
         </button>
-        <button
-          className={themeMenuOpen ? 'active' : ''}
-          onClick={() => setThemeMenuOpen(!themeMenuOpen)}
-        >
-          {theme === 'warm-slate' ? <Moon size={20} /> : <Sun size={20} />}
-          阅读主题
+        <button aria-label="打开七七" aria-haspopup="dialog" onClick={openQiqi}>
+          <MessageCircle size={20} />
+          七七
         </button>
       </nav>
-
+      <QiqiPanel key={user.id} userId={user.id} notify={notify} />
       {themeMenuOpen &&
         createPortal(
-          <>
-            <div className="theme-drawer-backdrop" onClick={() => setThemeMenuOpen(false)} />
-            <div className="theme-drawer">
-              <div className="theme-drawer-handle" />
-              <div className="theme-drawer-title">切换阅读主题</div>
-              <div className="theme-drawer-options">
-                <button
-                  type="button"
-                  className={`theme-drawer-item ${theme === 'paper-light' ? 'active' : ''}`}
-                  onClick={() => {
-                    setTheme('paper-light');
-                    setThemeMenuOpen(false);
-                  }}
-                >
-                  <div className="theme-dot dot-paper" />
-                  <div className="theme-item-text">
-                    <strong>素笺暖白</strong>
-                    <span>棉纸柔和底，日光讲义质感</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className={`theme-drawer-item ${theme === 'warm-slate' ? 'active' : ''}`}
-                  onClick={() => {
-                    setTheme('warm-slate');
-                    setThemeMenuOpen(false);
-                  }}
-                >
-                  <div className="theme-dot dot-slate" />
-                  <div className="theme-item-text">
-                    <strong>松烟暖灰</strong>
-                    <span>夜间低对比护眼暗调</span>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className={`theme-drawer-item ${theme === 'sepia-parchment' ? 'active' : ''}`}
-                  onClick={() => {
-                    setTheme('sepia-parchment');
-                    setThemeMenuOpen(false);
-                  }}
-                >
-                  <div className="theme-dot dot-sepia" />
-                  <div className="theme-item-text">
-                    <strong>羊皮纸棕</strong>
-                    <span>沉浸古籍温润色调</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </>,
+          <ReadingThemeMenu
+            theme={theme}
+            select={setTheme}
+            close={() => setThemeMenuOpen(false)}
+          />,
           document.body,
         )}
       {modal === 'import' && (

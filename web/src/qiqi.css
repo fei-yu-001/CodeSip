@@ -4,8 +4,12 @@
   gap: 5px;
   flex-shrink: 0;
 }
-.top-actions .icon-button.qiqi-launcher {
+.top-actions .icon-button.qiqi-launcher,
+.top-actions .icon-button.reader-theme-toggle {
   width: auto;
+  display: inline-flex;
+  gap: 5px;
+  font-size: 13px;
   min-width: 64px;
   padding-inline: 10px;
   border-radius: 999px;
@@ -391,4 +395,24 @@
   border-radius: 6px;
   background: var(--bg-surface);
   color: var(--accent-primary);
+}
+
+.qiqi-source-permission {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.qiqi-source-permission input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.qiqi-source-permission small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
 }
