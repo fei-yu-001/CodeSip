@@ -1,8 +1,10 @@
 import { webview } from '@kit.ArkWeb';
+import { QiqiBridge, QIQI_BRIDGE_PERMISSION } from '../qiqi/QiqiBridge';
 @Entry
 @Component
 struct Index {
   private controller: webview.WebviewController = new webview.WebviewController();
+  private qiqi: QiqiBridge = new QiqiBridge(this.controller);
   @State failed: boolean = false;
   aboutToAppear(): void {
     try {
@@ -10,6 +12,8 @@ struct Index {
     } catch (_) {}
   }
   aboutToDisappear(): void {
+    this.qiqi.cancelAll();
+    try { this.controller.deleteJavaScriptRegister('CodeSipQiqi'); } catch (_) {}
     try {
       webview.WebCookieManager.saveCookieSync();
     } catch (_) {}
@@ -17,6 +21,8 @@ struct Index {
   build() {
     Stack() {
       Web({ src: 'https://codesip.ddyu.online', controller: this.controller })
+        .javaScriptProxy({ object: this.qiqi, name: 'CodeSipQiqi', controller: this.controller,
+          methodList: ['version', 'start', 'cancel'], permission: QIQI_BRIDGE_PERMISSION })
         .javaScriptAccess(true)
         .domStorageAccess(true)
         .databaseAccess(true)
@@ -24,7 +30,7 @@ struct Index {
         .mixedMode(MixedMode.None)
         .zoomAccess(false)
         .cacheMode(CacheMode.Default)
-        .onPageBegin(() => { this.failed = false; })
+        .onPageBegin(() => { this.qiqi.cancelAll(); this.failed = false; })
         .onPageEnd(() => {
           try {
             webview.WebCookieManager.saveCookieSync();

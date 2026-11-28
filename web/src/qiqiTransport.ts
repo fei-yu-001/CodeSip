@@ -1,4 +1,5 @@
 import type { JsonObject } from '@earendil-works/pi-ai';
+import { qiqiFetch, QiqiNativeError } from './qiqiNative';
 import { qiqiEndpoint, validateQiqiConfig, QIQI_REPLY_LIMIT, type QiqiConfig } from './qiqiChat';
 
 export interface WireMessage {
@@ -20,7 +21,7 @@ export async function streamQiqiCompletion({
   tools = [],
   signal,
   onText,
-  fetcher = fetch,
+  fetcher = qiqiFetch,
 }: {
   config: QiqiConfig;
   messages: WireMessage[];
@@ -56,8 +57,13 @@ export async function streamQiqiCompletion({
     });
   } catch (error) {
     if (signal.aborted) throw signal.reason;
+    if (error instanceof QiqiNativeError) throw error;
     // Do not display arbitrary upstream error bodies: some gateways echo secrets.
-    throw new Error('连接失败。请检查 API 地址、网络，以及服务是否允许浏览器跨域访问（CORS）');
+    throw new Error(
+      typeof navigator !== 'undefined' && /HarmonyOS|OpenHarmony/i.test(navigator.userAgent)
+        ? '手机连接模型失败，请先更新 CodeSip 鸿蒙安装包，再检查 API 地址与手机网络'
+        : '连接失败。请检查 API 地址、网络，以及服务是否允许浏览器跨域访问（CORS）',
+    );
   }
   if (!response.ok) {
     await response.body?.cancel();
