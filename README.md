@@ -2,23 +2,25 @@
 
 把代码和学习笔记装进口袋。电脑整理，手机慢慢读。
 
-CodeSip 是一个自托管的只读阅读器，包含手机与桌面适配的 Web/PWA 客户端、独立 Node.js 后台、Obsidian 桌面同步插件，以及 HarmonyOS ArkWeb 应用工程。此项目与 Eternal Jade Scroll 游戏的服务、数据库、账号及发布目录完全独立。
+CodeSip 是一个自托管的只读阅读器，包含手机与桌面适配的 Web/PWA 客户端、独立 Rust 后台、Obsidian 桌面同步插件，以及 HarmonyOS ArkWeb 应用工程。此项目与 Eternal Jade Scroll 游戏的服务、数据库、账号及发布目录完全独立。
 
 ## 当前可用
 
 - 私人账号：首次设置密钥保护的账号初始化、登录、退出、服务端会话。
-- 代码项目：ZIP 导入、目录树、按路径筛选、语法高亮、代码折叠、自动换行、全文搜索与跳转到行。
-- 学习笔记：Markdown、表格、任务列表、代码块高亮、同步图片、基础 `[[双链]]` 和 `![[图片]]`。
-- 手机阅读：响应式目录抽屉、浅色/深色主题、上次阅读文件、完整项目离线下载、离线搜索。
+- 代码项目：ZIP 导入、目录树、按路径筛选、语法高亮、代码折叠、自动换行、全文搜索与跳转到行、字号缩放、保留阅读现场的文件标签。ZIP 可更新原项目，保留项目 ID、批注和个人编辑版。 支持删除单个文件、从首页删除项目。
+- 学习笔记：Markdown、表格、任务列表、代码块高亮、同步图片、`[[双链]]` 与章节跳转、`![[图片|宽x高]]`、高亮、隐藏注释、换行、Callout、折叠 HTML 和公式。
+- 手机阅读：紧凑工具栏、专注模式、响应式目录抽屉、浅色/深色/羊皮纸主题、阅读位置恢复、Markdown 标题定位、完整项目离线下载、离线搜索。
+- 应用更新：真实下载进度、失败重试、稍后重载与未保存批注保护，支持账号弹窗主动检查。[更新与同步说明](docs/app-updates.md)。
+- 阅读批注：独立保存于 SQLite，按账号、库和文件隔离，支持编辑、删除与多设备版本冲突检查，不修改原文。接口与存储边界见 [批注说明](docs/annotations.md)。
 - Obsidian：选择目录后手动或自动上传，按内容哈希增量同步，附件先行，处理改名、删除、冲突和失败重试；每个连接只授权一个笔记库，可轮换和撤销。
 - 液态玻璃：暖纸色正文、深海色场景、悬浮胶囊导航、SVG 边缘位移折射、点击回弹、导航拖动、减少动态/透明度适配。兼容环境使用磨砂降级。
 - 部署：独立 systemd 服务、HTTPS 反向代理、持久化 SQLite、限额、发布回滚和数据库备份脚本。
 
-「符号速览」目前是按文本提取的函数/类等声明，尚不是语言服务器或完整语义分析。跨文件定义跳转、引用分析、依赖图、多标签和批注属于后续工作。
+「符号速览」目前是按文本提取的函数/类等声明，尚不是语言服务器或完整语义分析。跨文件定义跳转、引用分析、依赖图属于后续工作。
 
 ## 快速运行
 
-需要 Node.js 24+ 与 npm。
+开发构建需要 Rust 1.100+、Node.js 24+ 与 npm；Windows 需要 Visual C++ 构建工具。生产 API 直接运行 Rust 可执行文件，无须 Node.js。
 
 ```powershell
 npm ci
@@ -29,6 +31,8 @@ npm run dev
 
 ```powershell
 npm run check
+npm run check:rust
+npm run test:rust
 npm test
 npm run build
 npx playwright install chromium
@@ -40,12 +44,12 @@ npm run test:e2e
 | 产物 | 位置 |
 | --- | --- |
 | Web/PWA 阅读器 | `dist/web/` |
-| 后台 | `dist/server/main.mjs` |
+| Rust 后台 | `dist/server/codesip-server`（Windows 为 `.exe`） |
 | Obsidian 插件 | `dist/obsidian/codesip-sync/` |
 | 插件 ZIP | `dist/web/codesip-obsidian.zip` |
 | 鸿蒙工程 | `harmony/` |
 
-生产运行：配置下方环境变量，再执行 `npm start`。源码不会被执行，HTML 也以文本处理。
+本地运行：构建后配置下方环境变量，再执行 `npm start`。生产运行由 systemd 直接启动原生程序。源码不会被执行，HTML 也以文本处理。
 
 ## 自托管配置
 
@@ -66,15 +70,17 @@ npm run test:e2e
 - nginx：仅 `sites-available/codesip` 和相应链接
 - 备份：`/var/backups/codesip`
 
-构建后执行 `npm run release` 生成 `.local/codesip-release.tar.gz`。首次设置资料也仅保存到忽略目录 `.local/`；生产数据和密钥不进入仓库。部署详见 [部署说明](docs/deployment.md)。
+Linux 发布还需执行 `npm run build:linux`（Rust musl target、Zig 与 cargo-zigbuild），然后执行 `npm run release` 生成 `.local/codesip-release.tar.gz`。首次设置资料也仅保存到忽略目录 `.local/`；生产数据和密钥不进入仓库。部署详见 [部署说明](docs/deployment.md)。
 
-## 连接 Obsidian
+## 设置 Obsidian 云端同步
 
-1. 在 CodeSip 的「学习笔记」选择「连接 Obsidian」，创建笔记库并生成连接信息。
+1. 在 CodeSip 的「学习笔记」选择「设置云端同步」，创建笔记库并生成连接信息。
 2. 下载插件 ZIP，将解压的 `codesip-sync` 目录放到电脑笔记库的 `.obsidian/plugins/`。
 3. 在 Obsidian 设置中启用该社区插件，把连接信息粘贴到 CodeSip Sync 设置并保存。
 4. 选择同步目录，点击「同步到 CodeSip」。确认内容正确后开启自动同步。
 5. 手机登录同一个 CodeSip 账号，打开笔记库；需要离线时点击「保存离线」。
+
+桌面快捷方式只负责启动 Obsidian；同步来源是当前打开的笔记库文件夹。「同步目录」留空表示整个库中的笔记和允许的附件。手机刷新只读取已上传的服务端副本，阅读批注和“我的编辑版”独立保存，不回写电脑笔记正文。
 
 插件使用绑定笔记库的专用凭据，与网页登录属于同一账号，无须把账号密码长期保存到插件。Obsidian 运行时自动上传，关闭后暂停；已上传内容仍可从手机访问。同步范围固定在首次成功同步时，换目录请创建新的目标笔记库，防止把其他目录的数据误删。
 
@@ -83,20 +89,21 @@ npm run test:e2e
 - 首版是私人单账号服务；公开注册、多账号管理和密码找回尚未提供。
 - ZIP 最大 24 MB，单文件 8 MB，单库解压后 64 MB / 4000 文件，账号总存储 512 MB，最多 60 个库。
 - 文本预览支持不超过 2 MB 的 UTF-8 文件；其他编码、大型二进制文件的预览需要后续适配。
-- 笔记支持基础 Wikilink 文件跳转；标题/块定位、笔记嵌入、Canvas、Dataview、公式和 Mermaid 渲染尚未实现。
+- 笔记支持 Wikilink 文件与标题跳转、常用 Obsidian 排版及公式；块引用定位、笔记嵌入、Canvas、Dataview、Mermaid 和第三方插件/主题 CSS 尚未兼容。
 - 外链图片不会自动下载。笔记库中同步的图片可随项目保存离线。
 - 离线副本按账号隔离保存在设备浏览器中，退出登录会清除本机缓存。尚未实现端到端加密；服务器管理员能访问数据库。
-- HarmonyOS 工程已生成未签名 HAP。真机安装需要个人华为签名；原生文件导入、分享和各系统版本的 ArkWeb 离线表现仍需真机验证。可以先用手机浏览器访问同一服务。
+- HarmonyOS 客户端 0.1.3 已签名并安装到连接的真机，已验证本轮阅读器更新的下载和重载（2026-11-27）。阅读器更新由同一 HTTPS 服务提供；原生文件导入、分享和各系统版本的 ArkWeb 离线表现仍需分别验证。
 - 浏览器测试当前覆盖 Chromium 的桌面和手机尺寸。Safari/Firefox 使用磨砂降级，未做实机验证。
 
 ## 验证记录
 
-实际构建、测试、部署结果及尚未完成的验证见 [首版验收记录](docs/verification.md)。液态玻璃的设计与兼容策略见 [设计说明](docs/liquid-glass.md)。
+项目更新、Obsidian 排版、字号和多文件标签的修复及真机结果见 [阅读与项目更新记录](docs/reader-fixes-2026-11-27.md)。Rust 后端架构、性能对比和迁移结果见 [Rust 重构记录](docs/rust-backend-2026-11-25.md)。实际构建、测试、部署结果及尚未完成的验证见 [验收记录](docs/verification.md)。液态玻璃的设计与兼容策略见 [设计说明](docs/liquid-glass.md)。
 
 ## 目录
 
 ```text
-server/      后台、存储、ZIP 导入
+server-rust/ Rust API、SQLite、ZIP 导入
+server/      旧版 API 测试基准和本地同步组件
 shared/      前后端数据类型
 web/         React 阅读器、离线缓存、玻璃材质
 plugin/      Obsidian 桌面同步插件
@@ -107,3 +114,12 @@ docs/        设计、部署及验收记录
 ```
 
 许可证沿用仓库的 GPL-3.0。玻璃边缘折射代码为本项目自行实现，依赖库遵循各自许可证。
+
+
+## 阅读与编辑
+
+阅读页底部常驻批注、批注列表、编辑和阅读设置。长按选择文字后点“批注”可引用选段；没有选段时引用当前阅读位置。阅读设置提供三种配色、14–22px 字号、紧凑/舒展行距，以及仅看代码。
+
+Markdown 笔记的“编辑”保存为独立的“我的编辑版”，可切换查看电脑原文。输入时自动存本机草稿，点击“保存编辑版”后上传；离线或失败时保留草稿，再联网后手动重试。其他设备修改同一版本时需要选择保留版本。电脑同步不会覆盖编辑版，也不会收到手机对正文的修改。可下载 Markdown 备份；原生 WebView 的系统下载仍需实机验证。
+
+实现与验证见 [阅读体验更新](docs/reading-experience.md)。

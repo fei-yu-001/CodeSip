@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
-import { buildApp } from '../server/app';
+import { buildApp } from './helpers/backend';
 const require = createRequire(import.meta.url);
 test('Obsidian bridge uploads notes and linked attachments, handles rename/delete, preserves excluded files and refuses rebinding', async (t) => {
   const { app, store } = await buildApp({

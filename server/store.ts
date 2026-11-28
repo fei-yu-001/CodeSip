@@ -20,13 +20,20 @@ import {
   MAX_LIBRARY,
 } from './paths';
 import type { ImportedFile } from './zip';
+import { SyncServerStore } from './syncServer';
+import { AnnotationStore } from './annotations';
+import { DocumentCopyStore } from './documentCopies';
 const scrypt = promisify(scryptCallback);
 export const digest = (input: string | Buffer) => createHash('sha256').update(input).digest('hex');
 export class Store {
   db: DatabaseSync;
+  syncServer: SyncServerStore;
+  annotations: AnnotationStore;
+  documentCopies: DocumentCopyStore;
   constructor(filename: string) {
     if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new DatabaseSync(filename);
+    this.syncServer = new SyncServerStore(this.db);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
@@ -36,6 +43,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS library_owner ON libraries(user_id);
       CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires);
     `);
+    this.annotations = new AnnotationStore(this);
+    this.documentCopies = new DocumentCopyStore(this);
   }
   get needsSetup() {
     return (this.db.prepare('SELECT count(*) n FROM users').get() as any).n === 0;
@@ -77,26 +86,27 @@ export class Store {
       .run(digest(token), userId, Date.now() + 30 * 86400000);
     return token;
   }
-  authenticate(token: string, isPlugin: boolean): { user: User; libraryId?: string } | undefined {
-    const row = (
-      isPlugin
-        ? this.db
-            .prepare(
-              'SELECT u.id,u.username,t.library_id FROM tokens t JOIN users u ON u.id=t.user_id WHERE hash=?',
-            )
-            .get(digest(token))
-        : this.db
-            .prepare(
-              'SELECT u.id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE hash=? AND expires>?',
-            )
-            .get(digest(token), Date.now())
-    ) as any;
-    return row
-      ? {
-          user: { id: row.id, username: row.username },
-          ...(isPlugin ? { libraryId: row.library_id } : {}),
-        }
-      : undefined;
+  authenticate(token: string, _isPlugin?: boolean): { user: User; libraryId?: string } | undefined {
+    const sessionRow = this.db
+      .prepare(
+        'SELECT u.id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE hash=? AND expires>?',
+      )
+      .get(digest(token), Date.now()) as any;
+    if (sessionRow) {
+      return { user: { id: sessionRow.id, username: sessionRow.username } };
+    }
+    const tokenRow = this.db
+      .prepare(
+        'SELECT u.id,u.username,t.library_id FROM tokens t JOIN users u ON u.id=t.user_id WHERE hash=?',
+      )
+      .get(digest(token)) as any;
+    if (tokenRow) {
+      return {
+        user: { id: tokenRow.id, username: tokenRow.username },
+        libraryId: tokenRow.library_id,
+      };
+    }
+    return undefined;
   }
   libraries(userId: string): Library[] {
     return this.db
@@ -215,6 +225,14 @@ export class Store {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+  removeFile(userId: string, id: string, input: { path: string; baseRevision: number }) {
+    if (!input || !Number.isSafeInteger(input.baseRevision) || input.baseRevision < 0)
+      throw new ApiError(400, '文件删除请求格式无效');
+    const path = cleanPath(input.path);
+    this.file(userId, id, path);
+    this.put(id, [], [path], input.baseRevision);
+    return this.manifest(userId, id);
   }
   sync(userId: string, id: string, patch: SyncPatch) {
     const lib = this.library(userId, id);

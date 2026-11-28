@@ -25,10 +25,10 @@ with tarfile.open(args.archive,'r:gz') as archive:
     archive.extractall(release,filter='data')
 try: pwd.getpwnam('codesip')
 except KeyError: run(['useradd','--system','--no-create-home','--shell','/usr/sbin/nologin','codesip'])
-# Dependency download and extraction run without root privileges.
-run(['chown','-R','codesip:codesip',str(release)])
-subprocess.run(['runuser','-u','codesip','--','env','npm_config_cache=/tmp/codesip-npm-cache','npm','ci','--omit=dev','--ignore-scripts','--no-audit','--no-fund','--registry=https://registry.npmjs.org'],cwd=release,check=True,stdout=subprocess.DEVNULL)
-run(['chown','-R','root:root',str(release)])
+# The native release needs no Node runtime or dependency installation.
+binary=release/'dist/server/codesip-server'
+if binary.read_bytes()[:6]!=b'\x7fELF\x02\x01': raise RuntimeError('Expected a Linux Rust executable')
+binary.chmod(0o755)
 CONFIG.parent.mkdir(mode=0o700,exist_ok=True)
 if not CONFIG.exists():
     shutil.copyfile(args.environment,CONFIG);CONFIG.chmod(0o600)

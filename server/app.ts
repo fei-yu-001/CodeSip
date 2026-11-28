@@ -9,7 +9,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { Store, digest } from './store';
 import { ApiError, MAX_ARCHIVE } from './paths';
 import { readArchive } from './zip';
-import type { User, SyncPatch } from '../shared/types';
+import { compressReadingResponse } from './readingTransport';
+import type { User, SyncPatch, AnnotationWrite, DocumentCopyWrite } from '../shared/types';
 export interface AppOptions {
   database: string;
   setupToken: string;
@@ -33,6 +34,19 @@ export async function buildApp(options: AppOptions) {
       : false,
     bodyLimit: 12 * 1024 * 1024,
     trustProxy: '127.0.0.1',
+  });
+  app.setErrorHandler((error, req, reply) => {
+    const e = error as Error & { statusCode?: number };
+    const status = e.statusCode && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 500;
+    if (status === 500) req.log.error({ err: e }, 'request failed');
+    reply.code(status).send({
+      error:
+        status === 500
+          ? '服务暂时无法完成请求，请稍后重试'
+          : status === 429
+            ? '操作太频繁，请稍后再试'
+            : e.message,
+    });
   });
   const store = new Store(options.database);
   let settingUp = false;
@@ -75,9 +89,13 @@ export async function buildApp(options: AppOptions) {
     }
     if (
       !req.url.startsWith('/api/') ||
-      ['/api/health', '/api/status', '/api/auth/setup', '/api/auth/login'].includes(
-        req.url.split('?')[0],
-      )
+      [
+        '/api/health',
+        '/api/status',
+        '/api/auth/setup',
+        '/api/auth/login',
+        '/api/v1/auth/login',
+      ].includes(req.url.split('?')[0])
     )
       return;
     const bearer = req.headers.authorization?.startsWith('Bearer ');
@@ -138,6 +156,80 @@ export async function buildApp(options: AppOptions) {
       return { user };
     },
   );
+  app.post<{
+    Body: {
+      username: string;
+      password: string;
+      device_id: string;
+      device_name?: string;
+      platform?: string;
+    };
+  }>('/api/v1/auth/login', authLimit, async (req, reply) => {
+    const user = await store.login(req.body?.username, req.body?.password);
+    const deviceId = req.body?.device_id || 'unknown-device';
+    const deviceName = req.body?.device_name || 'My Device';
+    const platform = req.body?.platform || 'web';
+    const reg = store.syncServer.registerDevice(user.id, deviceId, deviceName, platform);
+    const token = store.session(user.id);
+    setSession(reply, user);
+    return {
+      access_token: token,
+      refresh_token: token,
+      device_secret: reg.device_secret,
+      user,
+    };
+  });
+  app.get<{ Querystring: { since_seq?: string; limit?: string } }>(
+    '/api/v1/sync/changes',
+    async (req) => {
+      const sinceSeq = parseInt(req.query.since_seq || '0', 10) || 0;
+      const limit = parseInt(req.query.limit || '200', 10) || 200;
+      return store.syncServer.getChanges(req.identity!.user.id, sinceSeq, limit);
+    },
+  );
+  app.post<{ Body: { hashes: string[] } }>('/api/v1/assets/check', async (req) => {
+    const hashes = Array.isArray(req.body?.hashes) ? req.body.hashes : [];
+    const missing = store.syncServer.checkMissingAssets(req.identity!.user.id, hashes);
+    const uploadUrls: Record<string, string> = {};
+    for (const h of missing) uploadUrls[h] = `/api/v1/assets/upload?hash=${encodeURIComponent(h)}`;
+    return { missing_hashes: missing, upload_urls: uploadUrls };
+  });
+  app.post<{ Querystring: { hash?: string } }>('/api/v1/assets/upload', async (req) => {
+    const part = await req.file();
+    if (!part) throw new ApiError(400, '缺少资产文件');
+    const bytes = await part.toBuffer();
+    const hash = req.query.hash || digest(bytes);
+    store.syncServer.saveAsset(req.identity!.user.id, hash, bytes);
+    return { ok: true, hash };
+  });
+  app.get<{ Params: { hash: string } }>('/api/v1/assets/:hash', async (req, reply) => {
+    const content = store.syncServer.getAsset(req.identity!.user.id, req.params.hash);
+    if (!content) throw new ApiError(404, '资产不存在');
+    // Authenticated assets must not enter shared caches or survive logout there.
+    return reply.type('image/png').send(content);
+  });
+  app.post<{
+    Body: {
+      device_id: string;
+      notes: Array<{
+        note_id: string;
+        file_path: string;
+        content: string;
+        content_hash: string;
+        is_deleted?: number;
+      }>;
+    };
+  }>('/api/v1/sync/push', async (req) => {
+    if (!req.body?.device_id || !Array.isArray(req.body?.notes)) {
+      throw new ApiError(400, '请求数据格式不正确');
+    }
+    const results = store.syncServer.pushNotes(
+      req.identity!.user.id,
+      req.body.device_id,
+      req.body.notes,
+    );
+    return { results };
+  });
   app.get('/api/session', async (req) => ({ user: req.identity!.user }));
   app.post('/api/auth/logout', async (req, reply) => {
     if (req.cookies.codesip_session)
@@ -151,8 +243,60 @@ export async function buildApp(options: AppOptions) {
   app.post<{ Body: { name: string; kind: string } }>('/api/libraries', async (req) => ({
     library: store.createLibrary(req.identity!.user.id, req.body?.name, req.body?.kind),
   }));
-  app.get<{ Params: { id: string } }>('/api/libraries/:id/manifest', async (req) =>
-    store.manifest(req.identity!.user.id, req.params.id),
+  app.get<{ Params: { id: string } }>(
+    '/api/libraries/:id/manifest',
+    { onSend: compressReadingResponse },
+    async (req) => store.manifest(req.identity!.user.id, req.params.id),
+  );
+  const readerSession = async (req: import('fastify').FastifyRequest) => {
+    if (!req.cookies.codesip_session || req.headers.authorization || req.identity?.libraryId)
+      throw new ApiError(403, '请通过网页登录后管理阅读内容');
+  };
+  app.get<{ Params: { id: string }; Querystring: { path: string } }>(
+    '/api/libraries/:id/document-copy',
+    { preHandler: readerSession },
+    async (req) => ({
+      copy: store.documentCopies.get(req.identity!.user.id, req.params.id, req.query.path),
+    }),
+  );
+  app.put<{ Params: { id: string }; Body: DocumentCopyWrite }>(
+    '/api/libraries/:id/document-copy',
+    { preHandler: readerSession, bodyLimit: 3 * 1024 * 1024 },
+    async (req) => ({
+      copy: store.documentCopies.put(req.identity!.user.id, req.params.id, req.body),
+    }),
+  );
+  app.get<{ Params: { id: string }; Querystring: { path: string } }>(
+    '/api/libraries/:id/annotations',
+    { preHandler: readerSession },
+    async (req) => ({
+      annotations: store.annotations.list(req.identity!.user.id, req.params.id, req.query.path),
+    }),
+  );
+  app.put<{ Params: { id: string; annotationId: string }; Body: AnnotationWrite }>(
+    '/api/libraries/:id/annotations/:annotationId',
+    { preHandler: readerSession, bodyLimit: 64 * 1024 },
+    async (req) => ({
+      annotation: store.annotations.put(
+        req.identity!.user.id,
+        req.params.id,
+        req.params.annotationId,
+        req.body,
+      ),
+    }),
+  );
+  app.delete<{ Params: { id: string; annotationId: string }; Body: { expectedUpdatedAt: number } }>(
+    '/api/libraries/:id/annotations/:annotationId',
+    { preHandler: readerSession, bodyLimit: 1024 },
+    async (req) => {
+      store.annotations.delete(
+        req.identity!.user.id,
+        req.params.id,
+        req.params.annotationId,
+        req.body?.expectedUpdatedAt,
+      );
+      return { ok: true };
+    },
   );
   app.delete<{ Params: { id: string } }>('/api/libraries/:id', async (req) => {
     store.library(req.identity!.user.id, req.params.id);
@@ -161,6 +305,7 @@ export async function buildApp(options: AppOptions) {
   });
   app.get<{ Params: { id: string }; Querystring: { path: string } }>(
     '/api/libraries/:id/file',
+    { onSend: compressReadingResponse },
     async (req, reply) => {
       const row = store.file(req.identity!.user.id, req.params.id, req.query.path);
       reply.header('Content-Security-Policy', "default-src 'none'; sandbox");
@@ -169,6 +314,11 @@ export async function buildApp(options: AppOptions) {
         .type(row.is_text && !attachment ? 'text/plain; charset=utf-8' : row.media_type)
         .send(Buffer.from(row.content));
     },
+  );
+  app.delete<{ Params: { id: string }; Body: { path: string; baseRevision: number } }>(
+    '/api/libraries/:id/file',
+    { preHandler: readerSession, bodyLimit: 4096 },
+    async (req) => store.removeFile(req.identity!.user.id, req.params.id, req.body),
   );
   app.get<{ Params: { id: string }; Querystring: { q: string } }>(
     '/api/libraries/:id/search',
@@ -187,11 +337,29 @@ export async function buildApp(options: AppOptions) {
     store.db.prepare('DELETE FROM tokens WHERE library_id=?').run(req.params.id);
     return { ok: true };
   });
-  app.post<{ Querystring: { name: string; kind: string } }>('/api/import', async (req) => {
+  app.post<{
+    Querystring: { name: string; kind: string; libraryId?: string; baseRevision?: string };
+  }>('/api/import', async (req) => {
     const part = await req.file();
     if (!part) throw new ApiError(400, '请选择 ZIP 文件');
     const bytes = await part.toBuffer();
     const files = await readArchive(bytes);
+    if (req.query.libraryId) {
+      const previous = store.manifest(req.identity!.user.id, req.query.libraryId);
+      if (previous.library.kind !== (req.query.kind || 'code'))
+        throw new ApiError(400, '更新目标的项目类型不匹配');
+      const revision = Number(req.query.baseRevision);
+      if (!req.query.baseRevision || !Number.isSafeInteger(revision) || revision < 0)
+        throw new ApiError(400, '更新项目需要有效的版本号');
+      const incoming = new Set(files.map((file) => file.path));
+      store.put(
+        previous.library.id,
+        files,
+        previous.files.filter((file) => !incoming.has(file.path)).map((file) => file.path),
+        revision,
+      );
+      return { library: store.library(req.identity!.user.id, previous.library.id) };
+    }
     const lib = store.createLibrary(
       req.identity!.user.id,
       req.query.name || part.filename.replace(/\.zip$/i, ''),
@@ -278,20 +446,6 @@ export async function buildApp(options: AppOptions) {
         : reply.sendFile('index.html'),
     );
   }
-  app.setErrorHandler((error, req, reply) => {
-    const e = error as Error & { statusCode?: number };
-    const status = e.statusCode && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 500;
-    if (status === 500) req.log.error({ err: e }, 'request failed');
-    reply
-      .code(status)
-      .send({
-        error:
-          status === 500
-            ? '服务暂时无法完成请求，请稍后重试'
-            : status === 429
-              ? '操作太频繁，请稍后再试'
-              : e.message,
-      });
-  });
+
   return { app, store };
 }

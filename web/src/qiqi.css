@@ -1,0 +1,394 @@
+.qiqi-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.top-actions .icon-button.qiqi-launcher {
+  width: auto;
+  min-width: 64px;
+  padding-inline: 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.qiqi-launcher span {
+  font-size: 13px;
+}
+.qiqi-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  background: rgb(0 0 0 / 14%);
+  display: flex;
+  justify-content: flex-end;
+}
+.qiqi-panel {
+  width: min(480px, 100%);
+  height: 100%;
+  height: 100dvh;
+  box-sizing: border-box;
+  min-width: 0;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-hairline);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.qiqi-panel button,
+.qiqi-panel input,
+.qiqi-panel select,
+.qiqi-panel textarea {
+  font: inherit;
+}
+.qiqi-panel button:focus-visible,
+.qiqi-panel summary:focus-visible,
+.qiqi-panel select:focus-visible,
+.qiqi-panel a:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+.qiqi-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-hairline);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.qiqi-header > div {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.qiqi-header strong {
+  font-size: 18px;
+}
+.qiqi-header span {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qiqi-history {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.qiqi-history label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.qiqi-history select {
+  flex: 1;
+  width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-surface-muted);
+  color: var(--text-primary);
+}
+.qiqi-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px 16px;
+}
+.qiqi-empty {
+  margin: 30px auto;
+  max-width: 300px;
+  text-align: center;
+  color: var(--text-secondary);
+  line-height: 1.8;
+  font-size: 14px;
+}
+.qiqi-empty > svg {
+  color: var(--accent-primary);
+}
+.qiqi-message {
+  margin-bottom: 22px;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.qiqi-message > strong {
+  color: var(--accent-primary);
+  font-size: 12px;
+}
+.qiqi-user {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+.qiqi-user-text {
+  white-space: pre-wrap;
+  margin: 6px 0 0;
+}
+.qiqi-answer pre {
+  padding: 12px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  background: var(--code-bg);
+  border-radius: 8px;
+}
+.qiqi-answer code {
+  font-size: 0.9em;
+  font-family: Consolas, monospace;
+}
+.qiqi-answer p {
+  margin: 8px 0;
+}
+.qiqi-answer h1,
+.qiqi-answer h2,
+.qiqi-answer h3 {
+  font-size: 1.1em;
+  line-height: 1.5;
+}
+.qiqi-answer table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.qiqi-answer th,
+.qiqi-answer td {
+  padding: 6px;
+  border: 1px solid var(--border-hairline);
+}
+.qiqi-answer a {
+  color: var(--accent-primary);
+}
+.qiqi-context {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--bg-surface-muted);
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.qiqi-context summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.qiqi-context pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12px;
+  margin: 8px 0;
+}
+.qiqi-context p {
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.qiqi-context button,
+.qiqi-message-actions button,
+.qiqi-prompts button,
+.qiqi-retry {
+  color: var(--accent-primary);
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+.qiqi-message-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.qiqi-message-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.qiqi-message-status {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.qiqi-composer {
+  flex-shrink: 0;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 55%;
+  overflow-y: auto;
+}
+.qiqi-panel textarea,
+.qiqi-settings input:not([type='checkbox']),
+.qiqi-settings select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 9px;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.qiqi-panel textarea {
+  resize: vertical;
+  min-height: 70px;
+  max-height: 36dvh;
+}
+.qiqi-panel textarea:focus,
+.qiqi-panel input:focus,
+.qiqi-settings select:focus {
+  outline: 2px solid var(--accent-border);
+  border-color: var(--accent-primary);
+}
+.qiqi-send {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.qiqi-send > span {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.qiqi-send .button {
+  flex-shrink: 0;
+}
+.qiqi-pending-context {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.qiqi-pending-context > details {
+  flex: 1;
+}
+.qiqi-pending-context > button {
+  color: var(--text-secondary);
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  cursor: pointer;
+}
+.qiqi-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.qiqi-settings,
+.qiqi-save {
+  flex: 1;
+  min-height: 0;
+  padding: 20px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  font-size: 14px;
+}
+.qiqi-settings h3,
+.qiqi-save h3,
+.qiqi-settings p,
+.qiqi-save p {
+  margin: 0;
+}
+.qiqi-settings p,
+.qiqi-save p,
+.qiqi-composer > p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+.qiqi-settings label,
+.qiqi-save label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.qiqi-settings .qiqi-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.qiqi-check input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent-primary);
+}
+.qiqi-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.qiqi-panel [role='alert'] {
+  color: var(--syn-keyword);
+}
+.qiqi-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.qiqi-ask {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--accent-primary);
+}
+@media (max-width: 600px) {
+  .qiqi-panel {
+    width: 100%;
+    border-left: 0;
+  }
+  .qiqi-launcher {
+    padding-inline: 7px;
+  }
+  .qiqi-header {
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+  .qiqi-save textarea {
+    max-height: 45dvh;
+  }
+}
+
+.code-annotation-drawer .drawer-actions:has(.qiqi-ask) {
+  flex-wrap: wrap;
+}
+
+.qiqi-delete {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.qiqi-delete button {
+  padding: 5px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--accent-primary);
+}

@@ -1,0 +1,55 @@
+.library-sync-status {
+  /* Sync feedback must not move the open reader or change its scroll viewport. */
+  position: fixed;
+  z-index: 35;
+  right: 16px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(45dvh, 320px);
+  overflow: auto;
+  box-sizing: border-box;
+  border-radius: 12px;
+  box-shadow: var(--shadow-float);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 20px;
+  border: 1px solid var(--border-hairline);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.library-sync-status > div,
+.library-sync-status > span {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.library-sync-status p {
+  margin: 0 0 4px;
+}
+.library-sync-status ul {
+  padding-left: 20px;
+  margin: 6px 0 0;
+}
+.library-sync-status button {
+  flex: 0 0 auto;
+  color: var(--accent-primary);
+  padding: 6px;
+}
+.library-sync-status summary {
+  cursor: pointer;
+}
+
+.app.reading .library-sync-status {
+  /* Keep the bottom reading actions and document status reachable on desktop. */
+  bottom: calc(104px + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 700px) {
+  .library-sync-status,
+  .app.reading .library-sync-status {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+}

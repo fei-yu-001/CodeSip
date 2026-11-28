@@ -33,3 +33,68 @@ export interface SyncPatch {
   upserts: { path: string; content: string }[];
   deleted: string[];
 }
+export type SyncStatus = 'CLEAN' | 'DIRTY' | 'CONFLICT';
+export type AssetUploadStatus = 'LOCAL_ONLY' | 'UPLOADED' | 'REMOTE_ONLY';
+export interface NoteFrontmatter {
+  note_id: string;
+  title: string;
+  course?: string;
+  tags?: string[];
+  languages?: string[];
+  created_at: string;
+  updated_at: string;
+  revision: number;
+  device_id: string;
+}
+export interface NoteRecord {
+  note_id: string;
+  file_path: string;
+  content_hash: string;
+  local_rev: number;
+  server_seq: number;
+  sync_status: SyncStatus;
+  is_deleted: number;
+  updated_at: number;
+}
+export interface AssetRecord {
+  asset_hash: string;
+  local_rel_path: string;
+  byte_size: number;
+  upload_status: AssetUploadStatus;
+}
+export interface SyncStateRecord {
+  account_id: string;
+  device_id: string;
+  device_secret: string;
+  last_pulled_seq: number;
+}
+
+export interface ReaderAnnotation {
+  id: string;
+  path: string;
+  line: number;
+  snippet: string;
+  note: string;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface AnnotationWrite {
+  path: string;
+  line: number;
+  snippet: string;
+  note: string;
+  expectedUpdatedAt: number | null;
+}
+
+export interface ReaderDocumentCopy {
+  path: string;
+  content: string;
+  baseHash: string;
+  updatedAt: number;
+}
+export interface DocumentCopyWrite {
+  path: string;
+  content: string;
+  baseHash: string;
+  expectedUpdatedAt: number | null;
+}

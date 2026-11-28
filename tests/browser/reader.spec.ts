@@ -1,3 +1,4 @@
+import { readerControl } from './reader-controls';
 import { test, expect } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 const headers = { origin: 'http://127.0.0.1:4319' };
@@ -41,7 +42,7 @@ test('source import, search, note images/links, offline reload and liquid contro
   await page.getByRole('button', { name: 'brew.ts', exact: true }).click();
   await expect(page.locator('.cm-content')).toContainText('export function brew');
   expect(await page.locator('.cm-content').getAttribute('contenteditable')).toBe('false');
-  await page.getByRole('button', { name: '搜索项目内容' }).click();
+  await (await readerControl(page, '搜索项目内容')).click();
   await page.getByRole('textbox', { name: '项目内全文搜索' }).fill('coffee');
   await page.getByRole('button', { name: '搜索', exact: true }).click();
   await expect(page.locator('.search-results')).toContainText('第 2 行');
@@ -83,8 +84,8 @@ test('source import, search, note images/links, offline reload and liquid contro
   await expect(page.locator('.markdown img')).toHaveAttribute('src', /^blob:/);
   await expect(page.locator('.hljs-keyword').first()).toBeVisible();
   expect(await page.evaluate(() => Boolean((window as any).unsafe))).toBe(false);
-  await page.getByRole('button', { name: '保存离线', exact: true }).click();
-  await expect(page.getByRole('button', { name: '已保存离线', exact: true })).toBeVisible();
+  await (await readerControl(page, '保存离线')).click();
+  await expect(await readerControl(page, '已保存离线')).toBeVisible();
   await page.getByRole('link', { name: '下一篇', exact: true }).click();
   await expect(page.getByRole('heading', { name: '下一篇', exact: true })).toBeVisible();
   await page.screenshot({
