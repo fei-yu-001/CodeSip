@@ -6,6 +6,7 @@ import type {
   User,
 } from '../../../shared/types';
 import { HttpError } from '../data/http';
+import { cloudLibrary, uniqueLibraries, type LibraryListing } from '../data/libraryCatalog';
 
 export type SyncStage = 'manifest' | 'annotations' | 'documents' | 'reader-state' | 'files';
 export interface SyncFailure {
@@ -20,7 +21,7 @@ export interface LibrarySyncResult {
   failures: SyncFailure[];
 }
 export interface SyncResult {
-  libraries: Library[];
+  libraries: LibraryListing[];
   projects: LibrarySyncResult[];
   failures: SyncFailure[];
   pending: number;
@@ -29,7 +30,7 @@ export interface SyncResult {
 export interface LibrarySyncPorts {
   authenticate(signal: AbortSignal): Promise<User>;
   list(signal: AbortSignal): Promise<Library[]>;
-  localLibraries(): Promise<Library[]>;
+  localLibraries(): Promise<LibraryListing[]>;
   saved(id: string): Promise<boolean>;
   pendingLibraries(): string[];
   manifest(id: string, signal: AbortSignal): Promise<Manifest>;
@@ -47,7 +48,7 @@ export interface LibrarySyncPorts {
     progress: (done: number, total: number) => void,
     signal: AbortSignal,
   ): Promise<void>;
-  publish(libraries: Library[], complete: boolean): Promise<void>;
+  publish(libraries: LibraryListing[], complete: boolean): Promise<void>;
   pending(): number;
 }
 export async function runLibrarySync({
@@ -71,9 +72,9 @@ export async function runLibrarySync({
   const session = await ports.authenticate(signal);
   check();
   if (session.id !== user.id) throw new HttpError(401, '账号已改变，请重新登录后同步');
-  const libraries = await ports.list(signal);
+  const libraries = uniqueLibraries(await ports.list(signal)).map(cloudLibrary);
   check();
-  const local = await ports.localLibraries();
+  const local = uniqueLibraries(await ports.localLibraries());
   check();
   const pending = new Set(ports.pendingLibraries());
   const targets = [];
@@ -156,12 +157,19 @@ export async function runLibrarySync({
   }
   check();
   const failures = projects.flatMap((project) => project.failures);
-  const missing = local.filter((library) => !libraries.some((remote) => remote.id === library.id));
+  const remoteIds = new Set(libraries.map((library) => library.id));
+  const missing: LibraryListing[] = [];
+  for (const library of local) {
+    check();
+    if (!remoteIds.has(library.id) && (pending.has(library.id) || (await ports.saved(library.id))))
+      missing.push({ ...library, localOnly: true });
+  }
+  check();
   // A failed source download retains the previous revision and its directory.
   const combined = [
     ...libraries.map((library) =>
       failedFiles.has(library.id)
-        ? local.find((saved) => saved.id === library.id) || library
+        ? cloudLibrary(local.find((saved) => saved.id === library.id) || library)
         : downloaded.get(library.id) || library,
     ),
     ...missing,
@@ -184,6 +192,6 @@ export function syncResultMessage(result: SyncResult) {
   return result.pending
     ? `文件已同步，${result.pending} 项本机修改仍待处理，请在批注或编辑文档中查看`
     : result.localOnly
-      ? `同步完成；${result.localOnly} 个云端已移除的项目保留在本机`
+      ? `同步完成；${result.localOnly} 个旧项目已归入「仅本机保留」`
       : '同步完成，本机存档已更新';
 }

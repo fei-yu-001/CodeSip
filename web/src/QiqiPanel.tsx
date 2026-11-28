@@ -164,8 +164,15 @@ export default function QiqiPanel({
       setOpen(true);
       setError('');
     };
+    const launch = () => {
+      if (validSession.current) setOpen(true);
+    };
+    window.addEventListener('codesip:open-qiqi', launch);
     window.addEventListener('codesip:ask-qiqi', attach);
-    return () => window.removeEventListener('codesip:ask-qiqi', attach);
+    return () => {
+      window.removeEventListener('codesip:open-qiqi', launch);
+      window.removeEventListener('codesip:ask-qiqi', attach);
+    };
   }, [userId]);
   useEffect(() => {
     if (!open) return;

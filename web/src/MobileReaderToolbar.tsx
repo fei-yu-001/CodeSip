@@ -8,12 +8,14 @@ import {
   Maximize2,
   FolderOpen,
   MoreHorizontal,
+  MessageCircle,
   RefreshCw,
   Search,
   UserRound,
   WrapText,
 } from 'lucide-react';
 import { useDismissibleLayer } from './readerNavigation';
+import { openQiqi } from './qiqiChat';
 
 interface Props {
   path?: string;
@@ -71,6 +73,16 @@ export default function MobileReaderToolbar(props: Props) {
         <span className="mobile-reader-filename">
           {props.path?.split('/').pop() || props.libraryName || '选择文件'}
         </span>
+      </button>
+      <button
+        className="icon-button mobile-qiqi-launcher"
+        aria-label="打开七七"
+        aria-haspopup="dialog"
+        title="七七 · 阅读助手"
+        onClick={() => act(openQiqi)}
+      >
+        <MessageCircle size={18} />
+        <span>七七</span>
       </button>
       <button
         className="icon-button"

@@ -1,0 +1,16 @@
+.local-library-archives {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-hairline);
+}
+.local-library-archives > summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding-block: 8px;
+  font-size: 14px;
+}
+.local-library-archives > p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 8px 0 14px;
+}

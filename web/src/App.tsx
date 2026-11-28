@@ -75,6 +75,8 @@ import ReaderWorkspace from './ReaderWorkspace';
 import MobileReaderToolbar from './MobileReaderToolbar';
 import './reader-space.css';
 import QiqiPanel from './QiqiPanel';
+import { retainLocalArchives, type LibraryListing } from './data/libraryCatalog';
+import './library-archives.css';
 import LibraryCard from './LibraryCard';
 import { removeLibraryReaderData } from './readerIdentity';
 import './file-management.css';
@@ -285,7 +287,7 @@ export default function App() {
     [offline, setOffline] = useState(!navigator.onLine),
     [message, setMessage] = useState('');
   const [route, setRoute] = useState(readRoute),
-    [libraries, setLibraries] = useState<Library[]>([]),
+    [libraries, setLibraries] = useState<LibraryListing[]>([]),
     [manifest, setManifest] = useState<Manifest>(),
     [busy, setBusy] = useState(false);
   const [query, setQuery] = useState(''),
@@ -453,8 +455,10 @@ export default function App() {
         }
         const data = await api<{ libraries: Library[] }>('/libraries');
         if (generation !== cacheGeneration()) return;
-        setLibraries(data.libraries);
-        await save(`${user.id}:libraries`, data.libraries);
+        const next = retainLocalArchives(data.libraries, (await cachedLibraries(user)) || []);
+        if (generation !== cacheGeneration()) return;
+        setLibraries(next);
+        await save(`${user.id}:libraries`, next);
         setOffline(false);
       } catch (e) {
         if (generation !== cacheGeneration()) return;
@@ -596,9 +600,18 @@ export default function App() {
   const visibleLibraries = useMemo(
     () =>
       libraries.filter(
-        (l) => l.kind === route.kind && l.name.toLowerCase().includes(query.toLowerCase()),
+        (l) =>
+          !l.localOnly &&
+          l.kind === route.kind &&
+          l.name.toLowerCase().includes(query.toLowerCase()),
       ),
     [libraries, route.kind, query],
+  );
+  const localArchives = libraries.filter(
+    (library) =>
+      library.localOnly &&
+      library.kind === route.kind &&
+      library.name.toLowerCase().includes(query.toLowerCase()),
   );
   const { activeLibraries, emptyLibraries } = useMemo(() => {
     const active: Library[] = [];
@@ -644,14 +657,16 @@ export default function App() {
   );
   const importName = name.trim() || zip?.name.replace(/\.zip$/i, '') || '';
   const matchingImports = libraries.filter(
-    (lib) => lib.kind === route.kind && lib.name === importName,
+    (lib) => !lib.localOnly && lib.kind === route.kind && lib.name === importName,
   );
   const updateTarget =
     importTarget === 'auto'
       ? matchingImports.length === 1
         ? matchingImports[0]
         : undefined
-      : libraries.find((lib) => lib.id === importTarget && lib.kind === route.kind);
+      : libraries.find(
+          (lib) => !lib.localOnly && lib.id === importTarget && lib.kind === route.kind,
+        );
   const ambiguousImport = importTarget === 'auto' && matchingImports.length > 1;
   useEffect(() => {
     if (modal !== 'import') {
@@ -898,14 +913,15 @@ export default function App() {
             onClick={() => setRouteTo('code')}
           >
             <Code2 size={19} />
-            代码项目<span>{libraries.filter((l) => l.kind === 'code').length}</span>
+            代码项目<span>{libraries.filter((l) => !l.localOnly && l.kind === 'code').length}</span>
           </button>
           <button
             className={route.kind === 'notes' ? 'selected' : ''}
             onClick={() => setRouteTo('notes')}
           >
             <BookOpen size={19} />
-            学习笔记<span>{libraries.filter((l) => l.kind === 'notes').length}</span>
+            学习笔记
+            <span>{libraries.filter((l) => !l.localOnly && l.kind === 'notes').length}</span>
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -1002,7 +1018,10 @@ export default function App() {
               />
               <div className="welcome-copy">
                 <span className="welcome-count">
-                  {libraries.filter((library) => library.kind === route.kind).length}
+                  {
+                    libraries.filter((library) => !library.localOnly && library.kind === route.kind)
+                      .length
+                  }
                   {route.kind === 'code' ? ' 个项目' : ' 个笔记库'}
                 </span>
                 <h1 id="collection-title">{route.kind === 'code' ? '代码项目' : '学习笔记'}</h1>
@@ -1156,6 +1175,24 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              )}
+              {!!localArchives.length && (
+                <details className="local-library-archives">
+                  <summary>仅本机保留 ({localArchives.length})</summary>
+                  <p>这些项目已从云端移除，本机存档和批注仍保留。</p>
+                  <div className="library-grid" role="region" aria-label="仅本机保留的项目">
+                    {localArchives.map((library, index) => (
+                      <LibraryCard
+                        key={library.id}
+                        library={library}
+                        index={index}
+                        open={() => setRouteTo(library.kind, library.id)}
+                        remove={() => requestDelete(library)}
+                        disabled={busy || isRefreshing || !!progress}
+                      />
+                    ))}
+                  </div>
+                </details>
               )}
             </section>
           </div>
@@ -1622,7 +1659,7 @@ export default function App() {
                 <option value="auto">自动匹配同名项目</option>
                 <option value="new">新建项目</option>
                 {libraries
-                  .filter((lib) => lib.kind === route.kind)
+                  .filter((lib) => !lib.localOnly && lib.kind === route.kind)
                   .map((lib) => (
                     <option key={lib.id} value={lib.id}>
                       {lib.name} · {lib.fileCount} 个文件 · {relativeDate(lib.updatedAt)}

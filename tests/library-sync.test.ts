@@ -191,7 +191,7 @@ test('successful runs report pending drafts and retain remotely removed archives
   assert.equal(result.failures.length, 0);
   assert.equal(f.published[0].complete, true);
   assert.match(syncResultMessage(result), /2 项本机修改仍待处理/);
-  assert.match(syncResultMessage({ ...result, pending: 0 }), /1 个云端已移除的项目保留在本机/);
+  assert.match(syncResultMessage({ ...result, pending: 0 }), /1 个旧项目已归入「仅本机保留」/);
 });
 
 test('publication uses the downloaded revision if the project changed after listing', async () => {
@@ -203,4 +203,65 @@ test('publication uses the downloaded revision if the project changed after list
     [3, 3],
   );
   assert.equal(f.published[0].libraries[0].revision, 3);
+});
+
+test('repeated sync separates retained archives and removes stale listing-only entries', async () => {
+  const f = fixture();
+  const current = { ...library('current'), name: 'Same title' };
+  const old = { ...library('old'), name: 'Same title' };
+  let cached = [old, old, { ...library('unread'), name: 'Same title' }];
+  f.ports.list = async () => [current, current];
+  f.ports.localLibraries = async () => cached;
+  f.ports.saved = async (id) => id === 'old';
+  f.ports.publish = async (items) => {
+    cached = items;
+  };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = await f.run();
+    assert.deepEqual(
+      result.libraries.map(({ id, localOnly }) => [id, !!localOnly]),
+      [
+        ['current', false],
+        ['old', true],
+      ],
+    );
+    assert.equal(result.localOnly, 1);
+    assert.equal(result.failures.length, 0);
+  }
+});
+
+test('an archive with a draft remains discoverable without a saved source manifest', async () => {
+  const f = fixture();
+  f.ports.localLibraries = async () => [library('draft-only')];
+  f.ports.saved = async () => false;
+  f.ports.pendingLibraries = () => ['draft-only'];
+  const result = await f.run();
+  assert.equal(result.libraries.find((item) => item.id === 'draft-only')?.localOnly, true);
+});
+
+test('two real projects with the same title are never merged by title or size', async () => {
+  const f = fixture();
+  f.ports.list = async () => [
+    { ...library('a'), name: 'Same title' },
+    { ...library('b'), name: 'Same title' },
+  ];
+  f.ports.saved = async () => false;
+  const result = await f.run();
+  assert.deepEqual(
+    result.libraries.map((item) => item.id),
+    ['a', 'b'],
+  );
+  assert.ok(result.libraries.every((item) => !item.localOnly));
+});
+
+test('a restored cloud project loses its archive marker even when its download fails', async () => {
+  const f = fixture();
+  f.ports.localLibraries = async () => [{ ...library('a', 1), localOnly: true }];
+  f.ports.files = async () => {
+    throw new Error('offline');
+  };
+  const result = await f.run();
+  assert.equal(result.libraries[0].revision, 1);
+  assert.equal(result.libraries[0].localOnly, undefined);
+  assert.equal(result.localOnly, 0);
 });

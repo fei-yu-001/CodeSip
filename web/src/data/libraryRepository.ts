@@ -3,6 +3,7 @@ import { HttpError } from './http';
 import { cacheGeneration } from './session';
 import { cached, save, cacheAccess, cacheDatabase } from './localCache';
 import { abortError } from './abort';
+import type { LibraryListing } from './libraryCatalog';
 export const manifestKey = (user: User, id: string) => `${user.id}:manifest:${id}`;
 const blobKey = (user: User, id: string, hash: string) => `${user.id}:blob:${id}:${hash}`;
 export async function fileBlob(
@@ -184,4 +185,4 @@ export async function removeLibraryCache(user: User, id: string) {
     tx.onerror = () => reject(tx.error);
   });
 }
-export const cachedLibraries = (user: User) => cached<Library[]>(`${user.id}:libraries`);
+export const cachedLibraries = (user: User) => cached<LibraryListing[]>(`${user.id}:libraries`);

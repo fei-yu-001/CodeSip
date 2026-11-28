@@ -69,6 +69,9 @@ export function qiqiContext(context: QiqiContext): QiqiContext {
       (context.note?.length || 0) > 10000,
   };
 }
+export function openQiqi() {
+  window.dispatchEvent(new Event('codesip:open-qiqi'));
+}
 export function askQiqi(context: QiqiContext) {
   window.dispatchEvent(new CustomEvent('codesip:ask-qiqi', { detail: qiqiContext(context) }));
 }
