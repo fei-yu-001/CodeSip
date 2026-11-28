@@ -109,7 +109,9 @@ pub async fn handler(
     if api {
         h.insert("cache-control", HeaderValue::from_static("no-store"));
     } else {
-        h.insert("content-security-policy",HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"));
+        // User-configured model APIs are called by the client. This policy must
+        // allow HTTPS gateways while imported files retain their sandbox policy.
+        h.insert("content-security-policy",HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"));
     }
     if response.status() == StatusCode::TOO_MANY_REQUESTS {
         response

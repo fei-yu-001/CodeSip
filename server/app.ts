@@ -436,7 +436,7 @@ export async function buildApp(options: AppOptions) {
       if (!req.url.startsWith('/api/'))
         reply.header(
           'Content-Security-Policy',
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; worker-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
         );
       return payload;
     });

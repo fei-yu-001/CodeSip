@@ -45,8 +45,16 @@
 - 预设模型单测：`node --import tsx --test tests/qiqi-provider.test.ts`。
 - 新增 `tests/browser/qiqi-provider.spec.ts`，合成响应覆盖三个模型逐一发送、自定义接口往返、不同服务密钥不复用、373/412/1440 宽度与退出设置后释放更新保护。
 - `tests/browser/qiqi-update.spec.ts` 保留关闭按钮、Escape、后退及真正更新重载的集成检查。
-- 2026-11-28 统一验收：公开网关 OPTIONS 返回 204，允许请求头为 `*`，未单独列出 `Authorization`。实际 Chromium 159.0.8154.6 使用合成无效 Key、`credentials: omit` 发起跨域请求后读到 HTTP 401；应用显示“API 拒绝访问，请检查密钥和模型权限”，可重试或返回设置。此环境中没有发生 CORS 阻断，不能只根据 OPTIONS 报头认定直连不可用。
+- 2026-11-28 独立网关探测（未包含当时生产页面的 CSP，不能代表线上页面可连接）：公开网关 OPTIONS 返回 204，允许请求头为 `*`，未单独列出 `Authorization`。实际 Chromium 159.0.8154.6 使用合成无效 Key、`credentials: omit` 发起跨域请求后读到 HTTP 401；应用显示“API 拒绝访问，请检查密钥和模型权限”，可重试或返回设置。此环境中没有发生 CORS 阻断，不能只根据 OPTIONS 报头认定直连不可用。
 - 同一浏览器的独立本机对照：明确允许 Authorization 时可读取响应，缺少该许可且没有通配符时请求失败，通配符时可读取响应；未使用关闭 Web 安全的参数。没有用真实密钥生成回答，也没有验证 HarmonyOS/其他 WebView，跨域兼容性仍需在目标真机确认。
 - 网关探测禁用 trace，未读取凭据文件；仅保存白名单响应元数据和合成内容截图，位于忽略的 `.local/decoupling-acceptance-20261128/`。
 
 完整结果与验收修正见 [集成验收记录](integration-verification-2026-11-28.md)。
+
+### 2026-11-28 连接修复
+
+线上旧版 `5500b793cbec` 的 `connect-src 'self'` 在请求发出前拦截了外部模型接口，填写有效密钥也无法绕过。修复允许 HTTPS API 和 `localhost` / `127.0.0.1` 本机 HTTP，导入原文的沙箱策略保持不变。Pi 和模型请求仍在客户端，无新增设置页面、诊断功能或服务器模型代理。
+
+Service Worker 同时缓存页面响应头，构建版本现纳入服务端 HTTP 源码变化，让已有客户端能重新下载正确的页面策略。使用「头像 → 检查应用更新 → 重载更新」，无需清除本机数据；未选择记住的密钥在重载后需要重新填写。
+
+新增 `tests/browser-policy.test.ts` 和 `tests/browser/qiqi-connection.spec.ts`，用真实跨域接口覆盖 373/412/1440、旧策略拦截、更新后恢复连接及设置和聊天记录保留。浏览器验证服务器现在沿用实际 Rust 页面策略，模型联网用例不使用请求拦截或关闭 CSP。检查、构建、122 项单测和 42 项相关浏览器用例通过。验证产物位于忽略的 `.local/qiqi-connect-fix-20261128/`，没有使用用户私人笔记或真实 API 密钥。

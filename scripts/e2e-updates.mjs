@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 // Only mounted by the local browser-test server. Serve the real worker with a
 // controlled release and a streamed synthetic asset, without mocking SW APIs.
-export async function installUpdateFixtures(app) {
+export async function installUpdateFixtures(app, pagePolicy) {
   const builtWorker = await readFile('dist/web/sw.js', 'utf8');
   const index = await readFile('dist/web/index.html', 'utf8');
   const prefix = builtWorker.slice(0, builtWorker.indexOf('\n'));
@@ -13,7 +13,13 @@ export async function installUpdateFixtures(app) {
   const source = builtWorker.slice(builtWorker.indexOf('\n') + 1);
   const payload = Buffer.alloc(2 * 1024 * 1024, 79);
   const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
-  let release = { version: baseVersion, failure: '', slow: false, legacy: false };
+  let release = {
+    version: baseVersion,
+    failure: '',
+    slow: false,
+    legacy: false,
+    legacyPolicy: false,
+  };
   const page = () => index.replace(`content="${baseVersion}"`, `content="${release.version}"`);
   app.post('/__test/update-control', (request) => {
     const body = request.body || {};
@@ -22,6 +28,7 @@ export async function installUpdateFixtures(app) {
       failure: body.failure || '',
       slow: !!body.slow,
       legacy: !!body.legacy,
+      legacyPolicy: !!body.legacyPolicy,
     };
     return { baseVersion, version: release.version };
   });
@@ -52,7 +59,16 @@ self.addEventListener('fetch', event => {
   });
   for (const route of ['/', '/index.html'])
     app.get(route, (request, reply) =>
-      reply.type('text/html').header('Cache-Control', 'no-store').send(page()),
+      reply
+        .type('text/html')
+        .header('Cache-Control', 'no-store')
+        .header(
+          'Content-Security-Policy',
+          release.legacyPolicy
+            ? pagePolicy.replace(/connect-src[^;]*;/, "connect-src 'self';")
+            : pagePolicy,
+        )
+        .send(page()),
     );
   app.get('/__test/update-payload.bin', async (request, reply) => {
     const { failure, slow } = release;

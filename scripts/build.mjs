@@ -20,6 +20,9 @@ const shellFiles = (await walk('dist/web'))
   .sort();
 const workerSource = await readFile('web/service-worker.js', 'utf8');
 const versionHash = createHash('sha256').update(workerSource);
+// The shell cache stores HTTP headers too. A server policy change must offer
+// an update even when the HTML/JS bytes are unchanged, replacing cached CSP.
+versionHash.update((await readFile('server-rust/src/http.rs', 'utf8')).replaceAll('\r\n', '\n'));
 for (const file of shellFiles) {
   versionHash.update(path.relative('dist/web', file).replaceAll('\\', '/'));
   versionHash.update(await readFile(file));

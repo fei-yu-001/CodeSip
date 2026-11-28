@@ -19,7 +19,11 @@ const child = startRust({
 });
 const address = await readyRust(child);
 const app = Fastify({ bodyLimit: 25 * 1024 * 1024 });
-await installUpdateFixtures(app);
+const shell = await fetch(new URL('/index.html', address));
+const pagePolicy = shell.headers.get('content-security-policy');
+await shell.body?.cancel();
+if (!shell.ok || !pagePolicy) throw new Error('Missing real Rust page policy');
+await installUpdateFixtures(app, pagePolicy);
 // Preserve raw multipart and JSON bytes for the real API.
 app.register(async (proxy) => {
   proxy.removeAllContentTypeParsers();
